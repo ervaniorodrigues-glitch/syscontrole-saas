@@ -98,8 +98,22 @@ function getUltimoDiaDoMes(ano, mes) {
 }
 
 async function verificarResetMes() {
-    const mesAnoAtual = getMesAnoAtual();
-    if (presencaMesAtual !== mesAnoAtual && presencaMesAtual) {
+    try {
+        const mesAnoAtual = getMesAnoAtual();
+        
+        // Se não mudou de mês ou é a primeira vez, apenas retornar
+        if (!presencaMesAtual) {
+            presencaMesAtual = mesAnoAtual;
+            console.log(`✅ Mês atual inicializado: ${mesAnoAtual}`);
+            return;
+        }
+        
+        if (presencaMesAtual === mesAnoAtual) {
+            console.log(`✅ Mês atual: ${mesAnoAtual} (sem mudanças)`);
+            return;
+        }
+        
+        // Se chegou aqui, mudou de mês
         console.log(`🔄 Novo mês detectado: ${mesAnoAtual}`);
         console.log(`📦 SALVANDO HISTÓRICO DO MÊS ANTERIOR (${presencaMesAtual})...`);
         console.log(`   ⚠️ INCLUINDO FUNCIONÁRIOS OCULTOS NO HISTÓRICO`);
@@ -130,6 +144,12 @@ async function verificarResetMes() {
         presencaMesAtual = mesAnoAtual;
         salvarDadosPresenca();
         console.log(`✅ Sistema pronto para ${mesAnoAtual}`);
+    } catch (error) {
+        console.error('❌ ERRO em verificarResetMes:', error);
+        // Garantir que o mês atual está definido mesmo com erro
+        if (!presencaMesAtual) {
+            presencaMesAtual = getMesAnoAtual();
+        }
     }
 }
 
