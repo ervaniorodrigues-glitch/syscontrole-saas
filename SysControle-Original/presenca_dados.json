@@ -1,0 +1,5774 @@
+{
+  "presenca": {
+    "02-2026": {
+      "807": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "8": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "",
+          "isFolga": true
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "808": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "8": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "809": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "810": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "811": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "8": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "812": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "8": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "F",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "815": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "816": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "817": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "",
+          "isFolga": true
+        }
+      },
+      "819": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "820": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "834": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "",
+          "isFolga": true
+        },
+        "18": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "",
+          "isFolga": true
+        },
+        "21": {
+          "status": "",
+          "isFolga": true
+        },
+        "22": {
+          "status": "",
+          "isFolga": true
+        },
+        "23": {
+          "status": "",
+          "isFolga": true
+        },
+        "24": {
+          "status": "",
+          "isFolga": true
+        },
+        "25": {
+          "status": "",
+          "isFolga": true
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "837": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "F",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "838": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "F",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "839": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "847": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "",
+          "isFolga": true
+        },
+        "18": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "",
+          "isFolga": true
+        },
+        "21": {
+          "status": "",
+          "isFolga": true
+        },
+        "22": {
+          "status": "",
+          "isFolga": true
+        }
+      },
+      "853": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "856": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "860": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "863": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "",
+          "isFolga": true
+        },
+        "18": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "",
+          "isFolga": true
+        },
+        "21": {
+          "status": "",
+          "isFolga": true
+        },
+        "22": {
+          "status": "",
+          "isFolga": true
+        },
+        "23": {
+          "status": "",
+          "isFolga": true
+        },
+        "24": {
+          "status": "",
+          "isFolga": true
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "",
+          "isFolga": true
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "867": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "868": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "F",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "869": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "870": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "874": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "F",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "F",
+          "isFolga": false
+        }
+      },
+      "875": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "876": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "F",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "877": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "F",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "878": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "F",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "879": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "880": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "F",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "883": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "885": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "886": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "F",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "889": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "A",
+          "isFolga": false
+        },
+        "12": {
+          "status": "A",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "F",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "F",
+          "isFolga": false
+        },
+        "27": {
+          "status": "F",
+          "isFolga": false
+        }
+      },
+      "890": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "F",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "893": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "F",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "8": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "894": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "8": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "897": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "898": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "F",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "899": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "",
+          "isFolga": true
+        },
+        "18": {
+          "status": "F",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "901": {
+        "2": {
+          "status": "F",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "F",
+          "isFolga": false
+        },
+        "6": {
+          "status": "F",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "F",
+          "isFolga": false
+        },
+        "25": {
+          "status": "F",
+          "isFolga": false
+        },
+        "26": {
+          "status": "F",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "902": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "903": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "F",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "F",
+          "isFolga": false
+        },
+        "24": {
+          "status": "F",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "906": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "F",
+          "isFolga": false
+        },
+        "24": {
+          "status": "F",
+          "isFolga": false
+        },
+        "31": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "907": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "908": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "7": {
+          "status": "P",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "F",
+          "isFolga": false
+        }
+      },
+      "910": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "",
+          "isFolga": true
+        },
+        "18": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "911": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "912": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "913": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "P",
+          "isFolga": false
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "918": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "P",
+          "isFolga": false
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "",
+          "isFolga": true
+        },
+        "21": {
+          "status": "",
+          "isFolga": true
+        },
+        "22": {
+          "status": "",
+          "isFolga": true
+        }
+      },
+      "919": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "F",
+          "isFolga": false
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "F",
+          "isFolga": false
+        },
+        "24": {
+          "status": "F",
+          "isFolga": false
+        }
+      },
+      "920": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "F",
+          "isFolga": false
+        }
+      },
+      "921": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "F",
+          "isFolga": false
+        }
+      },
+      "922": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "F",
+          "isFolga": false
+        }
+      },
+      "923": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "P",
+          "isFolga": false
+        },
+        "6": {
+          "status": "F",
+          "isFolga": false
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        }
+      },
+      "924": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "P",
+          "isFolga": false
+        },
+        "10": {
+          "status": "P",
+          "isFolga": false
+        },
+        "11": {
+          "status": "P",
+          "isFolga": false
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "13": {
+          "status": "P",
+          "isFolga": false
+        },
+        "14": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "927": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "P",
+          "isFolga": false
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "929": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "930": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "932": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "934": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "935": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "936": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "937": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        }
+      },
+      "938": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "939": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "P",
+          "isFolga": false
+        },
+        "17": {
+          "status": "P",
+          "isFolga": false
+        },
+        "18": {
+          "status": "P",
+          "isFolga": false
+        },
+        "19": {
+          "status": "P",
+          "isFolga": false
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "23": {
+          "status": "F",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "940": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "941": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "942": {
+        "1": {
+          "status": "",
+          "isFolga": true
+        },
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "943": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "",
+          "isFolga": true
+        },
+        "18": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "21": {
+          "status": "",
+          "isFolga": true
+        },
+        "22": {
+          "status": "",
+          "isFolga": true
+        },
+        "23": {
+          "status": "",
+          "isFolga": true
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        },
+        "28": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "944": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "",
+          "isFolga": true
+        },
+        "18": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "P",
+          "isFolga": false
+        },
+        "22": {
+          "status": "",
+          "isFolga": true
+        },
+        "23": {
+          "status": "",
+          "isFolga": true
+        },
+        "24": {
+          "status": "",
+          "isFolga": true
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "945": {
+        "2": {
+          "status": "",
+          "isFolga": true
+        },
+        "3": {
+          "status": "",
+          "isFolga": true
+        },
+        "4": {
+          "status": "",
+          "isFolga": true
+        },
+        "5": {
+          "status": "",
+          "isFolga": true
+        },
+        "6": {
+          "status": "",
+          "isFolga": true
+        },
+        "7": {
+          "status": "",
+          "isFolga": true
+        },
+        "8": {
+          "status": "",
+          "isFolga": true
+        },
+        "9": {
+          "status": "",
+          "isFolga": true
+        },
+        "10": {
+          "status": "",
+          "isFolga": true
+        },
+        "11": {
+          "status": "",
+          "isFolga": true
+        },
+        "12": {
+          "status": "",
+          "isFolga": true
+        },
+        "13": {
+          "status": "",
+          "isFolga": true
+        },
+        "14": {
+          "status": "",
+          "isFolga": true
+        },
+        "15": {
+          "status": "",
+          "isFolga": true
+        },
+        "16": {
+          "status": "",
+          "isFolga": true
+        },
+        "17": {
+          "status": "",
+          "isFolga": true
+        },
+        "18": {
+          "status": "",
+          "isFolga": true
+        },
+        "19": {
+          "status": "",
+          "isFolga": true
+        },
+        "20": {
+          "status": "",
+          "isFolga": true
+        },
+        "23": {
+          "status": "P",
+          "isFolga": false
+        },
+        "24": {
+          "status": "P",
+          "isFolga": false
+        },
+        "25": {
+          "status": "P",
+          "isFolga": false
+        },
+        "26": {
+          "status": "P",
+          "isFolga": false
+        },
+        "27": {
+          "status": "P",
+          "isFolga": false
+        }
+      }
+    }
+  },
+  "comentarios": {
+    "02-2026": {
+      "880_2": {
+        "texto": "Foram embora mais cedo por falta de frente as 10:00",
+        "data": "2026-02-02T19:34:46.299Z"
+      },
+      "874_2": {
+        "texto": "Foram embora mais cedo por falta de frente as 10:00",
+        "data": "2026-02-02T19:34:46.522Z"
+      },
+      "878_2": {
+        "texto": "Foram embora mais cedo por falta de frente as 10:00",
+        "data": "2026-02-02T19:34:46.727Z"
+      },
+      "868_2": {
+        "texto": "Foram embora mais cedo por falta de frente as 10:00",
+        "data": "2026-02-02T19:34:46.937Z"
+      },
+      "876_2": {
+        "texto": "Foram embora mais cedo por falta de frente as 10:00",
+        "data": "2026-02-02T19:34:47.145Z"
+      },
+      "877_2": {
+        "texto": "Foram embora mais cedo por falta de frente as 10:00",
+        "data": "2026-02-02T19:34:47.374Z"
+      },
+      "886_2": {
+        "texto": "Foram embora mais cedo por falta de frente as 10:00",
+        "data": "2026-02-02T19:34:47.585Z"
+      },
+      "897_2": {
+        "texto": "Foi dispensado por desacatar o mestre da obra de forma ofensiva. \nOBS: Esse não tem permissão para acessar a obra mais.",
+        "data": "2026-02-02T19:36:22.440Z"
+      },
+      "880_4": {
+        "texto": "Foram embora por falta de Frente",
+        "data": "2026-02-04T14:09:59.674Z"
+      },
+      "874_4": {
+        "texto": "Foram embora por falta de Frente",
+        "data": "2026-02-04T14:09:59.875Z"
+      },
+      "878_4": {
+        "texto": "Foram embora por falta de Frente",
+        "data": "2026-02-04T14:10:00.086Z"
+      },
+      "868_4": {
+        "texto": "Foram embora por falta de Frente",
+        "data": "2026-02-04T14:10:00.293Z"
+      },
+      "876_4": {
+        "texto": "Foram embora por falta de Frente",
+        "data": "2026-02-04T14:10:00.493Z"
+      },
+      "877_4": {
+        "texto": "Foram embora por falta de Frente",
+        "data": "2026-02-04T14:10:00.700Z"
+      },
+      "886_4": {
+        "texto": "Foram embora por falta de Frente",
+        "data": "2026-02-04T14:10:00.908Z"
+      },
+      "923_5": {
+        "texto": "Foram embora mais cedo... Engenheiro da Hoss Ciente",
+        "data": "2026-02-05T17:21:18.511Z"
+      },
+      "922_5": {
+        "texto": "Foram embora mais cedo... Engenheiro da Hoss Ciente",
+        "data": "2026-02-05T17:21:18.754Z"
+      },
+      "921_5": {
+        "texto": "Foram embora mais cedo... Engenheiro da Hoss Ciente",
+        "data": "2026-02-05T17:21:18.966Z"
+      },
+      "906_5": {
+        "texto": "Foram embora mais cedo... Engenheiro da Hoss Ciente",
+        "data": "2026-02-05T17:21:19.171Z"
+      },
+      "919_5": {
+        "texto": "Foram embora mais cedo... Engenheiro da Hoss Ciente",
+        "data": "2026-02-05T17:21:19.378Z"
+      },
+      "886_23": {
+        "texto": "foram embora as 08:00 por falta de frente... Ferragem veio  errado.",
+        "data": "2026-02-23T12:21:20.760Z"
+      },
+      "877_23": {
+        "texto": "foram embora as 08:00 por falta de frente... Ferragem veio  errado.",
+        "data": "2026-02-23T12:21:20.915Z"
+      },
+      "876_23": {
+        "texto": "foram embora as 08:00 por falta de frente... Ferragem veio  errado.",
+        "data": "2026-02-23T12:21:21.057Z"
+      },
+      "878_23": {
+        "texto": "foram embora as 08:00 por falta de frente... Ferragem veio  errado.",
+        "data": "2026-02-23T12:21:21.199Z"
+      },
+      "868_23": {
+        "texto": "foram embora as 08:00 por falta de frente... Ferragem veio  errado.",
+        "data": "2026-02-23T12:21:21.349Z"
+      },
+      "874_23": {
+        "texto": "foram embora as 08:00 por falta de frente... Ferragem veio  errado.",
+        "data": "2026-02-23T12:21:21.489Z"
+      },
+      "880_23": {
+        "texto": "foram embora as 08:00 por falta de frente... Ferragem veio  errado.",
+        "data": "2026-02-23T12:21:21.633Z"
+      }
+    }
+  },
+  "ocorrencias": {},
+  "ocultos": {},
+  "mesAtual": "02-2026",
+  "ultimaAtualizacao": "2026-03-02T11:18:47.255Z"
+}

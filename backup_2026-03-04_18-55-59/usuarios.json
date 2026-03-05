@@ -1,0 +1,52 @@
+{
+  "usuarios": [
+    {
+      "id": 1,
+      "login": "master",
+      "senha": "@Senha01",
+      "tipo": "master",
+      "nome": "Administrador",
+      "ativo": true
+    },
+    {
+      "id": 3,
+      "login": "Ezequiel",
+      "senha": "123",
+      "nome": "Ezequiel",
+      "tipo": "comum",
+      "ativo": true
+    },
+    {
+      "id": 4,
+      "login": "GEANI",
+      "senha": "123",
+      "nome": "GEANI",
+      "tipo": "comum",
+      "ativo": true
+    },
+    {
+      "id": 5,
+      "login": "Convidado",
+      "senha": "123",
+      "nome": "Convidado",
+      "tipo": "comum",
+      "ativo": true
+    },
+    {
+      "id": 6,
+      "login": "Danilo",
+      "senha": "123",
+      "nome": "Danilo",
+      "tipo": "intermediario",
+      "ativo": true
+    },
+    {
+      "id": 7,
+      "login": "Junior",
+      "senha": "123",
+      "nome": "Junior",
+      "tipo": "intermediario",
+      "ativo": true
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Limpar Filtros</title>
+</head>
+<body>
+    <h1>Limpando filtros salvos...</h1>
+    <script>
+        // Limpar filtros salvos
+        localStorage.removeItem('syscontrole_filtros');
+        localStorage.removeItem('syscontrole_filtros_presenca');
+        
+        alert('Filtros limpos! Agora os campos vão iniciar vazios.');
+        
+        // Redirecionar para a página principal
+        window.location.href = '/';
+    </script>
+</body>
+</html>

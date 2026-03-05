@@ -1,0 +1,323 @@
+{
+  "presenca": {
+    "03-2026": {
+      "807": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "808": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "809": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "810": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "811": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "812": {
+        "2": {
+          "status": "F",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "816": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "817": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "837": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "856": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "F",
+          "isFolga": false
+        }
+      },
+      "867": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "868": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "869": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "875": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "876": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "877": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "878": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "880": {},
+      "886": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "889": {},
+      "890": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "893": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "894": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "898": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "899": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "F",
+          "isFolga": false
+        }
+      },
+      "902": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "903": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "913": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "924": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "939": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "943": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "F",
+          "isFolga": false
+        }
+      },
+      "945": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      },
+      "946": {
+        "2": {
+          "status": "P",
+          "isFolga": false
+        },
+        "3": {
+          "status": "P",
+          "isFolga": false
+        }
+      }
+    }
+  },
+  "comentarios": {},
+  "ocorrencias": {},
+  "ocultos": {},
+  "mesAtual": "03-2026",
+  "ultimaAtualizacao": "2026-03-03T15:10:29.946Z"
+}
