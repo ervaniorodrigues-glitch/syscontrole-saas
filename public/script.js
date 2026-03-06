@@ -8755,6 +8755,7 @@ class SysControleWeb {
                     
                     // ⭐ Se status é "AZUL", tratar como folga (vazio com formatação azul)
                     const isAzulMarcado = status === 'AZUL';
+                    const statusOriginal = status; // Guardar status original
                     if (isAzulMarcado) {
                         status = ''; // Mostrar vazio no input
                     }
@@ -8783,9 +8784,12 @@ class SysControleWeb {
                     // Adicionar classe para dias fora do período
                     const classeDiaFora = diaForaPeriodo ? 'dia-fora-periodo' : '';
                     
+                    // ⭐ IMPORTANTE: Adicionar data-status-original para manter o status AZUL
+                    const dataStatusOriginal = isAzulMarcado ? `data-status-original="AZUL"` : '';
+                    
                     bodyHtml += `<td class="col-dia ${classeDiaFora}">`;
                     bodyHtml += `<input type="text" class="presenca-input ${statusClass} ${inputClass} ${comentarioClass} ${classeDiaFora}" `;
-                    bodyHtml += `data-func="${func.id}" data-dia="${dia}" data-nome="${func.Nome || ''}" data-funcao="${func.Funcao || ''}" data-empresa="${func.Empresa || ''}" data-folga="${isFolgaSalva || isFimDeSemana || isAzulMarcado}" ${comentarioData} ${comentarioTitle} `;
+                    bodyHtml += `data-func="${func.id}" data-dia="${dia}" data-nome="${func.Nome || ''}" data-funcao="${func.Funcao || ''}" data-empresa="${func.Empresa || ''}" data-folga="${isFolgaSalva || isFimDeSemana || isAzulMarcado}" ${dataStatusOriginal} ${comentarioData} ${comentarioTitle} `;
                     bodyHtml += `value="${diaForaPeriodo ? '' : status}" maxlength="2" ${readonlyAttr} `;
                     bodyHtml += `>`;
                     bodyHtml += '</td>';
@@ -9137,11 +9141,17 @@ class SysControleWeb {
         const funcionarioEmpresa = input.dataset.empresa || '';
         const funcionarioFuncao = input.dataset.funcao || '';
         
-        // ⭐ Se tem marcador de azul, usar "AZUL" como status
-        if (input.dataset.statusAzul === 'true') {
+        // ⭐ PRIORIDADE 1: Se tem data-status-original="AZUL", manter AZUL
+        if (input.dataset.statusOriginal === 'AZUL' && valor === '') {
+            valor = 'AZUL';
+        }
+        // ⭐ PRIORIDADE 2: Se tem marcador de azul temporário, usar "AZUL" como status
+        else if (input.dataset.statusAzul === 'true') {
             valor = 'AZUL';
             // Limpar marcador após usar
             delete input.dataset.statusAzul;
+            // Adicionar data-status-original para persistir
+            input.dataset.statusOriginal = 'AZUL';
         }
         
         // Determinar formatação baseada na classe CSS
