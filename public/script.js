@@ -8768,11 +8768,11 @@ class SysControleWeb {
                     const inputClass = isFimDeSemana || isFolgaSalva || isAzulMarcado ? 'dia-folga-input' : '';
                     
                     // Verificar se tem comentário
-                    const chaveComentario = `${func.id}_${dia}`;
-                    const comentario = comentarios[chaveComentario];
-                    const temComentario = comentario && comentario.texto;
+                    const comentarioFunc = comentarios[func.id] || {};
+                    const comentario = comentarioFunc[dia];
+                    const temComentario = comentario && comentario.trim();
                     const comentarioClass = temComentario ? 'tem-comentario' : '';
-                    const comentarioTexto = temComentario ? comentario.texto.replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+                    const comentarioTexto = temComentario ? comentario.replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
                     const comentarioData = temComentario ? `data-comentario="${comentarioTexto}"` : '';
                     const comentarioTitle = '';
                     
@@ -8916,7 +8916,6 @@ class SysControleWeb {
             if (this._presencaBodyListener) {
                 tbody.removeEventListener('input', this._presencaBodyListener);
                 tbody.removeEventListener('blur', this._presencaBodyBlurListener, true);
-                tbody.removeEventListener('keypress', this._presencaBodyKeypressListener);
                 tbody.removeEventListener('keyup', this._presencaBodyKeyupListener);
                 tbody.removeEventListener('keydown', this._presencaBodyKeydownListener);
                 tbody.removeEventListener('focus', this._presencaBodyFocusListener, true);
@@ -8936,11 +8935,6 @@ class SysControleWeb {
                 this._presencaBodyBlurListener = (e) => {
                     if (e.target.classList.contains('presenca-input') && !e.target.disabled) {
                         this.salvarPresencaIndividual(e.target);
-                    }
-                };
-                this._presencaBodyKeypressListener = (e) => {
-                    if (e.target.classList.contains('presenca-input') && !e.target.disabled) {
-                        this.handlePresencaKeypress(e, e.target);
                     }
                 };
                 this._presencaBodyKeyupListener = (e) => {
@@ -8971,7 +8965,6 @@ class SysControleWeb {
                 
                 tbody.addEventListener('input', this._presencaBodyListener);
                 tbody.addEventListener('blur', this._presencaBodyBlurListener, true);
-                tbody.addEventListener('keypress', this._presencaBodyKeypressListener);
                 tbody.addEventListener('keyup', this._presencaBodyKeyupListener);
                 tbody.addEventListener('keydown', this._presencaBodyKeydownListener);
                 tbody.addEventListener('focus', this._presencaBodyFocusListener, true);
@@ -9501,10 +9494,61 @@ class SysControleWeb {
         if (event.key === 'Enter') {
             event.preventDefault();
             
-            // ⭐ ANTES de navegar, salvar a célula atual
-            this.salvarPresencaIndividual(input);
+            // Verificar se tem células selecionadas
+            this.initPresencaSelecao();
+            if (this.presencaSelecionados && this.presencaSelecionados.size > 1) {
+                // Pegar o valor da célula atual
+                const valor = input.value.toUpperCase().trim();
+                const valoresValidos = ['P', 'F', 'A', 'FE', 'FO', 'N', '.', '-'];
+                
+                // Se digitou um valor válido, aplicar em todas as selecionadas
+                if (valoresValidos.includes(valor) || valor === '') {
+                    const promessas = [];
+                    
+                    this.presencaSelecionados.forEach(inp => {
+                        if (valor === '.' || valor === '-' || valor === '') {
+                            // Folga ou vazio
+                            inp.value = '';
+                            inp.dataset.folga = (valor === '.' || valor === '-') ? 'true' : 'false';
+                            inp.className = 'presenca-input';
+                            if (valor === '.' || valor === '-') {
+                                inp.classList.add('dia-folga-input');
+                            }
+                        } else {
+                            // P, F, A, FE, FO, N
+                            inp.value = valor;
+                            inp.dataset.folga = 'false';
+                            inp.className = 'presenca-input';
+                            inp.classList.add(`status-${valor.toLowerCase()}`);
+                        }
+                        
+                        // Manter comentário se tiver
+                        if (inp.dataset.comentario) {
+                            inp.classList.add('tem-comentario');
+                        }
+                        
+                        promessas.push(this.salvarPresencaIndividual(inp));
+                    });
+                    
+                    // Aguardar todas as promessas serem resolvidas
+                    Promise.all(promessas).then(() => {
+                        this.limparSelecaoPresenca();
+                        this.calcularTotaisPresenca();
+                        
+                        // Atualizar tabela mês após todas as células serem salvas
+                        const modalTabelaMes = document.getElementById('modalTabelaMes');
+                        if (modalTabelaMes && modalTabelaMes.style.display !== 'none') {
+                            this.atualizarTabelaMes();
+                        }
+                        
+                        this.showToast(`${valor || 'Vazio'} aplicado em ${this.presencaSelecionados.size} células`, 'success');
+                    });
+                    return;
+                }
+            }
             
-            // Enter sempre navega para baixo
+            // Navegação normal se não tem seleção múltipla
+            this.salvarPresencaIndividual(input);
             this.navegarPresenca(input, 'ArrowDown');
             return;
         }
