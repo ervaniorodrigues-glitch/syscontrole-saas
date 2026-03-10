@@ -3918,16 +3918,79 @@ app.delete('/api/mudanca-funcao/:id', (req, res) => {
 app.post('/api/controle-presenca/exportar', async (req, res) => {
     verificarResetMes();
     
+    console.log('🔵 EXPORTANDO PRESENÇA...');
+    
     try {
         const { titulo } = req.body;
         
-        // Buscar funcionários ativos
+        // Buscar funcionários ativos + inativos que tiveram presença no mês
         const funcionarios = await new Promise((resolve, reject) => {
-            db.all(`SELECT id, Nome, Empresa, Funcao FROM SSMA WHERE Situacao = 'N' ORDER BY Empresa, Nome`, [], (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows);
+            // Primeiro buscar IDs que têm presença no mês
+            db.all('SELECT DISTINCT funcionarioId FROM PRESENCA WHERE mesAno = ?', [presencaMesAtual], (err, presencaRows) => {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+                
+                const idsComPresenca = presencaRows.map(r => r.funcionarioId);
+                
+                let sql = `SELECT id, Nome, Empresa, Funcao, Situacao FROM SSMA WHERE Situacao = 'N'`;
+                let params = [];
+                
+                // Se tem inativos com presença, incluir eles também
+                if (idsComPresenca.length > 0) {
+                    const placeholders = idsComPresenca.map(() => '?').join(',');
+                    sql += ` OR (Situacao = 'S' AND id IN (${placeholders}))`;
+                    params = idsComPresenca;
+                }
+                
+                db.all(sql, params, (err, rows) => {
+                    if (err) {
+                        reject(err);
+                        return;
+                    }
+                    
+                    // ⭐ ORDENAÇÃO: HOSS sempre primeiro
+                    rows.sort((a, b) => {
+                        if (a.Empresa === 'HOSS' && b.Empresa !== 'HOSS') return -1;
+                        if (a.Empresa !== 'HOSS' && b.Empresa === 'HOSS') return 1;
+                        if (a.Empresa === 'HOSS' && b.Empresa === 'HOSS') return a.Nome.localeCompare(b.Nome);
+                        const empresaCompare = a.Empresa.localeCompare(b.Empresa);
+                        if (empresaCompare !== 0) return empresaCompare;
+                        return a.Nome.localeCompare(b.Nome);
+                    });
+                    resolve(rows);
+                });
             });
         });
+        
+        console.log(`🔵 Total funcionários: ${funcionarios.length}`);
+        
+        // Buscar dados de presença do BANCO
+        const dadosPresencaBanco = await new Promise((resolve, reject) => {
+            db.all('SELECT funcionarioId, dia, status, comentario FROM PRESENCA WHERE mesAno = ?', [presencaMesAtual], (err, rows) => {
+                if (err) reject(err);
+                else {
+                    const dados = {};
+                    const comentarios = {};
+                    rows.forEach(row => {
+                        if (!dados[row.funcionarioId]) dados[row.funcionarioId] = {};
+                        dados[row.funcionarioId][row.dia] = row.status || '';
+                        if (row.comentario) {
+                            const chave = `${row.funcionarioId}_${row.dia}`;
+                            comentarios[chave] = { texto: row.comentario };
+                        }
+                    });
+                    resolve({ dados, comentarios });
+                }
+            });
+        });
+        
+        const dadosPresenca = dadosPresencaBanco.dados;
+        const comentarios = dadosPresencaBanco.comentarios;
+        
+        console.log(`🔵 Dados de presença carregados`);
+
         
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet('Presença');
@@ -3952,7 +4015,12 @@ app.post('/api/controle-presenca/exportar', async (req, res) => {
         // Cabeçalho das colunas
         const headerRow = sheet.getRow(4);
         headerRow.values = ['Empresa', 'Nome', 'Função', ...Array.from({length: diasNoMes}, (_, i) => i + 1), 'P', 'F'];
-        headerRow.font = { bold: true };
+        headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        headerRow.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FF1F7E3D' }
+        };
         headerRow.alignment = { horizontal: 'center' };
         
         // Marcar fins de semana no cabeçalho
@@ -3968,16 +4036,19 @@ app.post('/api/controle-presenca/exportar', async (req, res) => {
             }
         }
         
-        // Dados dos funcionários
-        const dadosPresenca = presencaMemoria[presencaMesAtual] || {};
-        const comentarios = comentariosPresenca[presencaMesAtual] || {};
+        // Separar ativos e inativos
+        const ativos = funcionarios.filter(f => f.Situacao !== 'S');
+        const inativos = funcionarios.filter(f => f.Situacao === 'S');
+        const funcionariosOrdenados = [...ativos, ...inativos];
+        
         let rowIndex = 5;
         
-        for (const func of funcionarios) {
+        // Dados dos funcionários
+        for (const func of funcionariosOrdenados) {
             const row = sheet.getRow(rowIndex);
             const presencaFunc = dadosPresenca[func.id] || {};
+            const isInativo = func.Situacao === 'S';
             
-            // Dados já estão em maiúsculo no banco
             row.getCell(1).value = func.Empresa || '';
             row.getCell(2).value = func.Nome || '';
             row.getCell(3).value = func.Funcao || '';
@@ -3986,32 +4057,20 @@ app.post('/api/controle-presenca/exportar', async (req, res) => {
             let totalF = 0;
             
             for (let dia = 1; dia <= diasNoMes; dia++) {
-                const dadosDia = presencaFunc[dia];
-                let valorExibir = '';
+                const valorExibir = presencaFunc[dia] || '';
                 
-                // Extrair o valor correto do objeto ou string
-                if (typeof dadosDia === 'object' && dadosDia !== null) {
-                    if (dadosDia.isFolga) {
-                        valorExibir = '-'; // Folga = hífen
-                    } else {
-                        valorExibir = dadosDia.status || '';
-                    }
-                } else if (typeof dadosDia === 'string') {
-                    valorExibir = dadosDia;
-                }
+                // Se o valor for "AZUL", não exibir texto, apenas aplicar cor de fundo
+                const valorParaExibir = (valorExibir === 'AZUL') ? '' : valorExibir;
                 
-                row.getCell(3 + dia).value = valorExibir;
+                row.getCell(3 + dia).value = valorParaExibir;
                 row.getCell(3 + dia).alignment = { horizontal: 'center' };
                 
-                // Verificar se tem comentário para esta célula
+                // Verificar comentário
                 const chaveComentario = `${func.id}_${dia}`;
                 if (comentarios[chaveComentario] && comentarios[chaveComentario].texto) {
-                    // Adicionar comentário como nota na célula
                     row.getCell(3 + dia).note = {
-                        texts: [{ text: comentarios[chaveComentario].texto }],
-                        margins: { insetmode: 'auto' }
+                        texts: [{ text: comentarios[chaveComentario].texto }]
                     };
-                    // Adicionar borda laranja para indicar comentário
                     row.getCell(3 + dia).border = {
                         top: { style: 'medium', color: { argb: 'FFFF9800' } },
                         left: { style: 'medium', color: { argb: 'FFFF9800' } },
@@ -4023,137 +4082,234 @@ app.post('/api/controle-presenca/exportar', async (req, res) => {
                 if (valorExibir === 'P') totalP++;
                 if (valorExibir === 'F') totalF++;
                 
+                // Verificar se é fim de semana
+                const data = new Date(ano, mes, dia);
+                const diaSemana = data.getDay();
+                const isFimDeSemana = (diaSemana === 0 || diaSemana === 6);
+                
+                // Limpar espaços do valor
+                const valorLimpo = (valorExibir || '').trim();
+                
                 // Colorir baseado no status
-                if (valorExibir === '-') {
-                    // Folga - azul claro
-                    row.getCell(3 + dia).fill = {
-                        type: 'pattern',
-                        pattern: 'solid',
-                        fgColor: { argb: 'FF87CEEB' }
-                    };
-                } else if (valorExibir === 'P') {
+                // Prioridade: inativo > status específico > AZUL/folga/ponto > fim de semana vazio
+                if (isInativo) {
+                    // Inativo sempre amarelo (sobrepõe tudo)
+                    row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF99' } };
+                } else if (valorLimpo === 'P') {
                     // Presente - verde claro
-                    row.getCell(3 + dia).fill = {
-                        type: 'pattern',
-                        pattern: 'solid',
-                        fgColor: { argb: 'FF90EE90' }
-                    };
-                } else if (valorExibir === 'F') {
+                    row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF90EE90' } };
+                } else if (valorLimpo === 'F') {
                     // Falta - vermelho claro
-                    row.getCell(3 + dia).fill = {
-                        type: 'pattern',
-                        pattern: 'solid',
-                        fgColor: { argb: 'FFFF6B6B' }
-                    };
-                } else if (valorExibir === 'N') {
-                    // Novo - laranja claro
-                    row.getCell(3 + dia).fill = {
-                        type: 'pattern',
-                        pattern: 'solid',
-                        fgColor: { argb: 'FFFFD700' }
-                    };
-                } else if (valorExibir === 'A') {
-                    // Atestado - azul
-                    row.getCell(3 + dia).fill = {
-                        type: 'pattern',
-                        pattern: 'solid',
-                        fgColor: { argb: 'FF6495ED' }
-                    };
-                } else if (valorExibir === 'FE') {
-                    // Férias - roxo
-                    row.getCell(3 + dia).fill = {
-                        type: 'pattern',
-                        pattern: 'solid',
-                        fgColor: { argb: 'FFBA55D3' }
-                    };
-                } else if (valorExibir === 'FO') {
+                    row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF6B6B' } };
+                } else if (valorLimpo === 'FO') {
                     // Folga programada - amarelo
-                    row.getCell(3 + dia).fill = {
-                        type: 'pattern',
-                        pattern: 'solid',
-                        fgColor: { argb: 'FFFFFF00' }
-                    };
+                    row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+                } else if (valorLimpo === 'FE') {
+                    // Férias - roxo
+                    row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBA55D3' } };
+                } else if (valorLimpo === 'A') {
+                    // Atestado - azul
+                    row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6495ED' } };
+                } else if (valorLimpo === 'N') {
+                    // Novo - dourado
+                    row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFD700' } };
+                } else if (valorLimpo === 'AZUL' || valorLimpo === '-' || valorLimpo === '.' || (valorLimpo === '' && isFimDeSemana)) {
+                    // AZUL (folga digitada), hífen, ponto OU fim de semana vazio - azul médio
+                    row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB3E5FC' } };
                 }
             }
             
             row.getCell(4 + diasNoMes).value = totalP;
             row.getCell(5 + diasNoMes).value = totalF;
             
+            // Se é inativo, aplicar fundo amarelo nas colunas
+            if (isInativo) {
+                [1, 2, 3, 4 + diasNoMes, 5 + diasNoMes].forEach(col => {
+                    row.getCell(col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF99' } };
+                });
+            }
+            
             rowIndex++;
         }
+        
+        // ============ RESUMO POR FUNÇÃO ============
+        const resumoPorFuncao = {};
+        for (const func of funcionarios) {
+            const presencaFunc = dadosPresenca[func.id] || {};
+            if (!resumoPorFuncao[func.Funcao]) {
+                resumoPorFuncao[func.Funcao] = {};
+                for (let dia = 1; dia <= diasNoMes; dia++) {
+                    resumoPorFuncao[func.Funcao][dia] = { P: 0, F: 0 };
+                }
+            }
+            for (let dia = 1; dia <= diasNoMes; dia++) {
+                const status = presencaFunc[dia] || '';
+                if (status === 'P') resumoPorFuncao[func.Funcao][dia].P++;
+                if (status === 'F') resumoPorFuncao[func.Funcao][dia].F++;
+            }
+        }
+        
+        rowIndex += 2;
+        const headerResumo = sheet.getRow(rowIndex);
+        headerResumo.values = ['FUNÇÃO', ...Array.from({length: diasNoMes}, (_, i) => i + 1), 'P', 'F'];
+        headerResumo.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        headerResumo.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F7E3D' } };
+        headerResumo.alignment = { horizontal: 'center' };
+        rowIndex++;
+        
+        const funcoes = Object.keys(resumoPorFuncao).sort();
+        for (const funcao of funcoes) {
+            const row = sheet.getRow(rowIndex);
+            row.getCell(1).value = funcao;
+            row.getCell(1).font = { bold: true };
+            let totalP = 0, totalF = 0;
+            for (let dia = 1; dia <= diasNoMes; dia++) {
+                const dados = resumoPorFuncao[funcao][dia];
+                row.getCell(1 + dia).value = dados.P;
+                row.getCell(1 + dia).alignment = { horizontal: 'center' };
+                row.getCell(1 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB3E5FC' } };
+                totalP += dados.P;
+                totalF += dados.F;
+            }
+            row.getCell(2 + diasNoMes).value = totalP;
+            row.getCell(2 + diasNoMes).font = { bold: true };
+            row.getCell(3 + diasNoMes).value = totalF;
+            row.getCell(3 + diasNoMes).font = { bold: true };
+            rowIndex++;
+        }
+        
+        // Linha TOTAL da função
+        const rowTotalFuncao = sheet.getRow(rowIndex);
+        rowTotalFuncao.getCell(1).value = 'TOTAL';
+        rowTotalFuncao.getCell(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        rowTotalFuncao.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } };
+        let totalGeralPFuncao = 0, totalGeralFFuncao = 0;
+        for (let dia = 1; dia <= diasNoMes; dia++) {
+            let diaTotal = 0;
+            for (const funcao of funcoes) diaTotal += resumoPorFuncao[funcao][dia].P;
+            rowTotalFuncao.getCell(1 + dia).value = diaTotal;
+            rowTotalFuncao.getCell(1 + dia).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            rowTotalFuncao.getCell(1 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } };
+            rowTotalFuncao.getCell(1 + dia).alignment = { horizontal: 'center' };
+            totalGeralPFuncao += diaTotal;
+        }
+        rowTotalFuncao.getCell(2 + diasNoMes).value = totalGeralPFuncao;
+        rowTotalFuncao.getCell(2 + diasNoMes).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        rowTotalFuncao.getCell(2 + diasNoMes).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } };
+        for (const funcao of funcoes) {
+            for (let dia = 1; dia <= diasNoMes; dia++) totalGeralFFuncao += resumoPorFuncao[funcao][dia].F;
+        }
+        rowTotalFuncao.getCell(3 + diasNoMes).value = totalGeralFFuncao;
+        rowTotalFuncao.getCell(3 + diasNoMes).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        rowTotalFuncao.getCell(3 + diasNoMes).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } };
+        rowIndex++;
+        
+        // ============ RESUMO POR EMPRESA ============
+        const resumoPorEmpresa = {};
+        for (const func of funcionarios) {
+            const presencaFunc = dadosPresenca[func.id] || {};
+            if (!resumoPorEmpresa[func.Empresa]) {
+                resumoPorEmpresa[func.Empresa] = {};
+                for (let dia = 1; dia <= diasNoMes; dia++) {
+                    resumoPorEmpresa[func.Empresa][dia] = { P: 0, F: 0 };
+                }
+            }
+            for (let dia = 1; dia <= diasNoMes; dia++) {
+                const status = presencaFunc[dia] || '';
+                if (status === 'P') resumoPorEmpresa[func.Empresa][dia].P++;
+                if (status === 'F') resumoPorEmpresa[func.Empresa][dia].F++;
+            }
+        }
+        
+        rowIndex += 2;
+        const headerResumoEmpresa = sheet.getRow(rowIndex);
+        headerResumoEmpresa.values = ['EMPRESA', ...Array.from({length: diasNoMes}, (_, i) => i + 1), 'P', 'F'];
+        headerResumoEmpresa.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        headerResumoEmpresa.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F7E3D' } };
+        headerResumoEmpresa.alignment = { horizontal: 'center' };
+        rowIndex++;
+        
+        const empresas = Object.keys(resumoPorEmpresa).sort((a, b) => {
+            if (a === 'HOSS' && b !== 'HOSS') return -1;
+            if (a !== 'HOSS' && b === 'HOSS') return 1;
+            return a.localeCompare(b);
+        });
+        
+        for (const empresa of empresas) {
+            const row = sheet.getRow(rowIndex);
+            
+            // Verificar se esta empresa tem apenas funcionários inativos
+            const funcionariosDaEmpresa = funcionariosOrdenados.filter(f => f.Empresa === empresa);
+            const temAtivos = funcionariosDaEmpresa.some(f => f.Situacao !== 'S');
+            const corFundo = temAtivos ? 'FFB3E5FC' : 'FFFFFF99'; // Azul médio para ativos, amarelo para só inativos
+            
+            row.getCell(1).value = empresa;
+            row.getCell(1).font = { bold: true };
+            row.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: corFundo } };
+            
+            let totalP = 0, totalF = 0;
+            for (let dia = 1; dia <= diasNoMes; dia++) {
+                const dados = resumoPorEmpresa[empresa][dia];
+                row.getCell(1 + dia).value = dados.P;
+                row.getCell(1 + dia).alignment = { horizontal: 'center' };
+                row.getCell(1 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: corFundo } };
+                totalP += dados.P;
+                totalF += dados.F;
+            }
+            row.getCell(2 + diasNoMes).value = totalP;
+            row.getCell(2 + diasNoMes).font = { bold: true };
+            row.getCell(2 + diasNoMes).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: corFundo } };
+            row.getCell(3 + diasNoMes).value = totalF;
+            row.getCell(3 + diasNoMes).font = { bold: true };
+            row.getCell(3 + diasNoMes).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: corFundo } };
+            rowIndex++;
+        }
+        
+        // Linha TOTAL da empresa
+        const rowTotalEmpresa = sheet.getRow(rowIndex);
+        rowTotalEmpresa.getCell(1).value = 'TOTAL';
+        rowTotalEmpresa.getCell(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        rowTotalEmpresa.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } };
+        let totalGeralPEmpresa = 0, totalGeralFEmpresa = 0;
+        for (let dia = 1; dia <= diasNoMes; dia++) {
+            let diaTotal = 0;
+            for (const empresa of empresas) diaTotal += resumoPorEmpresa[empresa][dia].P;
+            rowTotalEmpresa.getCell(1 + dia).value = diaTotal;
+            rowTotalEmpresa.getCell(1 + dia).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            rowTotalEmpresa.getCell(1 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } };
+            rowTotalEmpresa.getCell(1 + dia).alignment = { horizontal: 'center' };
+            totalGeralPEmpresa += diaTotal;
+        }
+        rowTotalEmpresa.getCell(2 + diasNoMes).value = totalGeralPEmpresa;
+        rowTotalEmpresa.getCell(2 + diasNoMes).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        rowTotalEmpresa.getCell(2 + diasNoMes).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } };
+        for (const empresa of empresas) {
+            for (let dia = 1; dia <= diasNoMes; dia++) totalGeralFEmpresa += resumoPorEmpresa[empresa][dia].F;
+        }
+        rowTotalEmpresa.getCell(3 + diasNoMes).value = totalGeralFEmpresa;
+        rowTotalEmpresa.getCell(3 + diasNoMes).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        rowTotalEmpresa.getCell(3 + diasNoMes).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } };
         
         // Ajustar larguras
         sheet.getColumn(1).width = 20;
         sheet.getColumn(2).width = 30;
         sheet.getColumn(3).width = 20;
-        for (let i = 4; i <= 3 + diasNoMes; i++) {
-            sheet.getColumn(i).width = 4;
-        }
-        sheet.getColumn(4 + diasNoMes).width = 5;
-        sheet.getColumn(5 + diasNoMes).width = 5;
-        
-        // Bordas
-        for (let r = 4; r < rowIndex; r++) {
-            for (let c = 1; c <= 5 + diasNoMes; c++) {
-                const cell = sheet.getCell(r, c);
-                // Só aplicar borda fina se não tiver borda de comentário (laranja)
-                if (!cell.border || !cell.border.top || cell.border.top.style !== 'medium') {
-                    cell.border = {
-                        top: { style: 'thin' },
-                        left: { style: 'thin' },
-                        bottom: { style: 'thin' },
-                        right: { style: 'thin' }
-                    };
-                }
-            }
-        }
-        
-        // Criar aba de comentários se houver comentários
-        const comentariosArray = Object.entries(comentarios);
-        if (comentariosArray.length > 0) {
-            const sheetComentarios = workbook.addWorksheet('Comentários');
-            
-            // Cabeçalho
-            sheetComentarios.getRow(1).values = ['Funcionário', 'Empresa', 'Dia', 'Comentário', 'Data do Comentário'];
-            sheetComentarios.getRow(1).font = { bold: true };
-            sheetComentarios.getRow(1).fill = {
-                type: 'pattern',
-                pattern: 'solid',
-                fgColor: { argb: 'FFFF9800' }
-            };
-            
-            let rowComentario = 2;
-            for (const [chave, dados] of comentariosArray) {
-                const [funcId, dia] = chave.split('_');
-                const func = funcionarios.find(f => f.id == funcId);
-                
-                if (func && dados.texto) {
-                    const row = sheetComentarios.getRow(rowComentario);
-                    row.getCell(1).value = func.Nome || '';
-                    row.getCell(2).value = func.Empresa || '';
-                    row.getCell(3).value = parseInt(dia);
-                    row.getCell(4).value = dados.texto;
-                    row.getCell(5).value = dados.data ? new Date(dados.data).toLocaleString('pt-BR') : '';
-                    rowComentario++;
-                }
-            }
-            
-            // Ajustar larguras
-            sheetComentarios.getColumn(1).width = 35;
-            sheetComentarios.getColumn(2).width = 20;
-            sheetComentarios.getColumn(3).width = 8;
-            sheetComentarios.getColumn(4).width = 50;
-            sheetComentarios.getColumn(5).width = 20;
-        }
+        for (let i = 4; i <= 3 + diasNoMes; i++) sheet.getColumn(i).width = 4;
         
         const buffer = await workbook.xlsx.writeBuffer();
         
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet; charset=UTF-8');
-        res.setHeader('Content-Disposition', `attachment; filename="Presenca_${meses[mes]}_${ano}.xlsx"`);
+        console.log(`✅ Excel gerado! Tamanho: ${buffer.length} bytes`);
+        
+        // Nome do arquivo sem acentos e sem underscores problemáticos
+        const mesesSemAcento = ['JANEIRO', 'FEVEREIRO', 'MARCO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO'];
+        const nomeArquivo = `Presenca-${mesesSemAcento[mes]}-${ano}.xlsx`;
+        
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=${nomeArquivo}`);
         res.send(buffer);
         
     } catch (error) {
-        console.error('Erro ao exportar presença:', error);
+        console.error('❌ Erro ao exportar presença:', error);
         res.status(500).json({ error: error.message });
     }
 });
