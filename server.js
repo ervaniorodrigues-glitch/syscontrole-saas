@@ -3677,40 +3677,48 @@ app.post('/api/controle-presenca/comentario', (req, res) => {
     
     const mesAno = presencaMesAtual;
     
-    // Salvar no banco de dados
-    if (comentario && comentario.trim()) {
-        db.run(
-            `INSERT INTO PRESENCA (mesAno, funcionarioId, dia, comentario, dataAtualizacao)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(mesAno, funcionarioId, dia) DO UPDATE SET
-                comentario = excluded.comentario,
-                dataAtualizacao = CURRENT_TIMESTAMP`,
-            [mesAno, funcionarioId, dia, comentario.trim()],
-            function(err) {
-                if (err) {
-                    console.error('❌ Erro ao salvar comentário:', err);
-                    return res.status(500).json({ error: err.message });
+    // Buscar nome do funcionário
+    db.get('SELECT Nome, Empresa, Funcao FROM SSMA WHERE id = ?', [funcionarioId], (err, funcionario) => {
+        if (err || !funcionario) {
+            console.error('❌ Erro ao buscar funcionário:', err);
+            return res.status(500).json({ error: 'Funcionário não encontrado' });
+        }
+        
+        // Salvar no banco de dados
+        if (comentario && comentario.trim()) {
+            db.run(
+                `INSERT INTO PRESENCA (mesAno, funcionarioId, funcionarioNome, funcionarioEmpresa, funcionarioFuncao, dia, comentario, dataAtualizacao)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(mesAno, funcionarioId, dia) DO UPDATE SET
+                    comentario = excluded.comentario,
+                    dataAtualizacao = CURRENT_TIMESTAMP`,
+                [mesAno, funcionarioId, funcionario.Nome, funcionario.Empresa, funcionario.Funcao, dia, comentario.trim()],
+                function(err) {
+                    if (err) {
+                        console.error('❌ Erro ao salvar comentário:', err);
+                        return res.status(500).json({ error: err.message });
+                    }
+                    
+                    console.log(`✅ Comentário salvo: ${funcionario.Nome} - Dia ${dia}`);
+                    res.json({ success: true });
                 }
-                
-                console.log(`✅ Comentário salvo: Funcionário ${funcionarioId} - Dia ${dia}`);
-                res.json({ success: true });
-            }
-        );
-    } else {
-        // Deletar comentário se vazio
-        db.run(
-            'UPDATE PRESENCA SET comentario = NULL WHERE mesAno = ? AND funcionarioId = ? AND dia = ?',
-            [mesAno, funcionarioId, dia],
-            function(err) {
-                if (err) {
-                    console.error('❌ Erro ao deletar comentário:', err);
-                    return res.status(500).json({ error: err.message });
+            );
+        } else {
+            // Deletar comentário se vazio
+            db.run(
+                'UPDATE PRESENCA SET comentario = NULL WHERE mesAno = ? AND funcionarioId = ? AND dia = ?',
+                [mesAno, funcionarioId, dia],
+                function(err) {
+                    if (err) {
+                        console.error('❌ Erro ao deletar comentário:', err);
+                        return res.status(500).json({ error: err.message });
+                    }
+                    
+                    res.json({ success: true });
                 }
-                
-                res.json({ success: true });
-            }
-        );
-    }
+            );
+        }
+    });
 });
 
 // POST - Ocultar funcionário da lista de presença

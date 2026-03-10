@@ -9059,14 +9059,19 @@ class SysControleWeb {
         if (valor === '.' || valor === '-') {
             this.initPresencaSelecao();
             
+            console.log('🔍 DEBUG: presencaSelecionados.size =', this.presencaSelecionados ? this.presencaSelecionados.size : 0);
+            
             // Se tem múltiplas células selecionadas, aplicar em todas
             const celulasParaFormatar = this.presencaSelecionados && this.presencaSelecionados.size > 0
                 ? Array.from(this.presencaSelecionados)
                 : [input];
             
+            console.log('🔍 DEBUG: Formatando', celulasParaFormatar.length, 'células');
+            
             celulasParaFormatar.forEach(inp => {
                 // ⭐ MARCAR com valor especial "AZUL" antes de limpar visualmente
                 inp.dataset.statusAzul = 'true';
+                inp.dataset.statusOriginal = 'AZUL'; // ⭐ ADICIONAR PARA PERSISTIR
                 inp.value = '';
                 inp.dataset.folga = 'true';
                 inp.className = 'presenca-input dia-folga-input';
@@ -9496,62 +9501,11 @@ class SysControleWeb {
         if (event.key === 'Enter') {
             event.preventDefault();
             
-            // Verificar se tem células selecionadas
-            this.initPresencaSelecao();
-            if (this.presencaSelecionados && this.presencaSelecionados.size > 1) {
-                // Pegar o valor da célula atual
-                const valor = input.value.toUpperCase().trim();
-                const valoresValidos = ['P', 'F', 'A', 'FE', 'FO', 'N', '.', '-'];
-                
-                // Se digitou um valor válido, aplicar em todas as selecionadas
-                if (valoresValidos.includes(valor) || valor === '') {
-                    const promessas = [];
-                    
-                    this.presencaSelecionados.forEach(inp => {
-                        if (valor === '.' || valor === '-' || valor === '') {
-                            // Folga ou vazio
-                            inp.value = '';
-                            inp.dataset.folga = (valor === '.' || valor === '-') ? 'true' : 'false';
-                            inp.className = 'presenca-input';
-                            if (valor === '.' || valor === '-') {
-                                inp.classList.add('dia-folga-input');
-                            }
-                        } else {
-                            // P, F, A, FE, FO, N
-                            inp.value = valor;
-                            inp.dataset.folga = 'false';
-                            inp.className = 'presenca-input';
-                            inp.classList.add(`status-${valor.toLowerCase()}`);
-                        }
-                        
-                        // Manter comentário se tiver
-                        if (inp.dataset.comentario) {
-                            inp.classList.add('tem-comentario');
-                        }
-                        
-                        promessas.push(this.salvarPresencaIndividual(inp));
-                    });
-                    
-                    // Aguardar todas as promessas serem resolvidas
-                    Promise.all(promessas).then(() => {
-                        this.limparSelecaoPresenca();
-                        this.calcularTotaisPresenca();
-                        
-                        // Atualizar tabela mês após todas as células serem salvas
-                        const modalTabelaMes = document.getElementById('modalTabelaMes');
-                        if (modalTabelaMes && modalTabelaMes.style.display !== 'none') {
-                            console.log('📢 TRIGGER: Múltiplas células salvas - Atualizando Tabela MÊS IMEDIATAMENTE...');
-                            this.atualizarTabelaMes();
-                        }
-                        
-                        this.showToast(`${valor || 'Vazio'} aplicado em ${this.presencaSelecionados.size} células`, 'success');
-                    });
-                    return;
-                }
-            }
+            // ⭐ ANTES de navegar, salvar a célula atual
+            this.salvarPresencaIndividual(input);
             
-            // Navegação normal se não tem seleção múltipla
-            this.navegarPresenca(input, 'ArrowRight');
+            // Enter sempre navega para baixo
+            this.navegarPresenca(input, 'ArrowDown');
             return;
         }
         
