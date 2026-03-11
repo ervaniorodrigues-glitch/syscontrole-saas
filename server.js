@@ -3492,9 +3492,12 @@ app.get('/api/controle-presenca/dados', (req, res) => {
                 dados[row.funcionarioId] = {};
             }
             
+            // ⭐ Se status é ponto ou hífen, marcar como folga
+            const isFolga = (row.status === '.' || row.status === '-');
+            
             dados[row.funcionarioId][row.dia] = {
                 status: row.status || '',
-                isFolga: false
+                isFolga: isFolga
             };
             
             if (row.comentario) {
@@ -4059,8 +4062,8 @@ app.post('/api/controle-presenca/exportar', async (req, res) => {
             for (let dia = 1; dia <= diasNoMes; dia++) {
                 const valorExibir = presencaFunc[dia] || '';
                 
-                // Se o valor for "AZUL", não exibir texto, apenas aplicar cor de fundo
-                const valorParaExibir = (valorExibir === 'AZUL') ? '' : valorExibir;
+                // ⭐ Se o valor for ponto ou hífen, não exibir no Excel (deixar vazio)
+                const valorParaExibir = (valorExibir === '.' || valorExibir === '-') ? '' : valorExibir;
                 
                 row.getCell(3 + dia).value = valorParaExibir;
                 row.getCell(3 + dia).alignment = { horizontal: 'center' };
@@ -4113,8 +4116,8 @@ app.post('/api/controle-presenca/exportar', async (req, res) => {
                 } else if (valorLimpo === 'N') {
                     // Novo - dourado
                     row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFD700' } };
-                } else if (valorLimpo === 'AZUL' || valorLimpo === '-' || valorLimpo === '.' || (valorLimpo === '' && isFimDeSemana)) {
-                    // AZUL (folga digitada), hífen, ponto OU fim de semana vazio - azul médio
+                } else if (valorLimpo === '.' || valorLimpo === '-' || (valorLimpo === '' && isFimDeSemana)) {
+                    // Ponto, hífen OU fim de semana vazio - azul médio
                     row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB3E5FC' } };
                 }
             }

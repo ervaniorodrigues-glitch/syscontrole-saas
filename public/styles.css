@@ -6603,6 +6603,7 @@ tr[data-status-epi="Vencido"] td:nth-child(14) {
 .presenca-input.dia-folga-input {
     background: #b3e5fc !important;
     border-color: #4fc3f7;
+    color: #b3e5fc !important; /* ⭐ Texto azul = invisível no fundo azul */
 }
 
 /* Coluna de folga nas linhas de totais e funções */

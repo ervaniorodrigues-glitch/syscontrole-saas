@@ -8753,19 +8753,13 @@ class SysControleWeb {
                     let status = typeof dadosDia === 'object' ? (dadosDia.status || '') : (dadosDia || '');
                     const isFolgaSalva = typeof dadosDia === 'object' ? dadosDia.isFolga : false;
                     
-                    // ⭐ Se status é "AZUL", tratar como folga (vazio com formatação azul)
-                    const isAzulMarcado = status === 'AZUL';
-                    const statusOriginal = status; // Guardar status original
-                    if (isAzulMarcado) {
-                        status = ''; // Mostrar vazio no input
-                    }
-                    
                     // Verificar se é fim de semana
                     const isFimDeSemana = this.isFimDeSemanaOuFeriado(ano, mes, dia);
                     
-                    // ⭐ CORREÇÃO: Aplicar azul se for fim de semana, folga salva OU marcado como AZUL
-                    const statusClass = status ? `status-${status.toLowerCase()}` : (isFolgaSalva || isFimDeSemana || isAzulMarcado ? 'dia-folga-input' : '');
-                    const inputClass = isFimDeSemana || isFolgaSalva || isAzulMarcado ? 'dia-folga-input' : '';
+                    // ⭐ Aplicar azul se for fim de semana, folga salva OU ponto/hífen
+                    const isPontoOuHifen = (status === '.' || status === '-');
+                    const statusClass = status ? `status-${status.toLowerCase()}` : (isFolgaSalva || isFimDeSemana || isPontoOuHifen ? 'dia-folga-input' : '');
+                    const inputClass = isFimDeSemana || isFolgaSalva || isPontoOuHifen ? 'dia-folga-input' : '';
                     
                     // Verificar se tem comentário
                     const comentarioFunc = comentarios[func.id] || {};
@@ -8784,12 +8778,9 @@ class SysControleWeb {
                     // Adicionar classe para dias fora do período
                     const classeDiaFora = diaForaPeriodo ? 'dia-fora-periodo' : '';
                     
-                    // ⭐ IMPORTANTE: Adicionar data-status-original para manter o status AZUL
-                    const dataStatusOriginal = isAzulMarcado ? `data-status-original="AZUL"` : '';
-                    
                     bodyHtml += `<td class="col-dia ${classeDiaFora}">`;
                     bodyHtml += `<input type="text" class="presenca-input ${statusClass} ${inputClass} ${comentarioClass} ${classeDiaFora}" `;
-                    bodyHtml += `data-func="${func.id}" data-dia="${dia}" data-nome="${func.Nome || ''}" data-funcao="${func.Funcao || ''}" data-empresa="${func.Empresa || ''}" data-folga="${isFolgaSalva || isFimDeSemana || isAzulMarcado}" ${dataStatusOriginal} ${comentarioData} ${comentarioTitle} `;
+                    bodyHtml += `data-func="${func.id}" data-dia="${dia}" data-nome="${func.Nome || ''}" data-funcao="${func.Funcao || ''}" data-empresa="${func.Empresa || ''}" data-folga="${isFolgaSalva || isFimDeSemana || isPontoOuHifen}" ${comentarioData} ${comentarioTitle} `;
                     bodyHtml += `value="${diaForaPeriodo ? '' : status}" maxlength="2" ${readonlyAttr} `;
                     bodyHtml += `>`;
                     bodyHtml += '</td>';
@@ -9043,7 +9034,7 @@ class SysControleWeb {
     }
     
     // Formatar input de presença
-    formatarPresenca(input) {
+    async formatarPresenca(input) {
         let valor = input.value.toUpperCase();
         
         // ============================================
@@ -9061,11 +9052,9 @@ class SysControleWeb {
             
             console.log('🔍 DEBUG: Formatando', celulasParaFormatar.length, 'células');
             
-            celulasParaFormatar.forEach(inp => {
-                // ⭐ MARCAR com valor especial "AZUL" antes de limpar visualmente
-                inp.dataset.statusAzul = 'true';
-                inp.dataset.statusOriginal = 'AZUL'; // ⭐ ADICIONAR PARA PERSISTIR
-                inp.value = '';
+            for (const inp of celulasParaFormatar) {
+                // ⭐ SALVAR O PONTO (não limpar) mas com formatação azul
+                inp.value = '.';  // ⭐ Manter o ponto visível
                 inp.dataset.folga = 'true';
                 inp.className = 'presenca-input dia-folga-input';
                 
@@ -9075,8 +9064,8 @@ class SysControleWeb {
                 }
                 
                 // ⭐ SALVAR A FORMATAÇÃO NO BANCO
-                this.salvarPresencaIndividual(inp);
-            });
+                await this.salvarPresencaIndividual(inp);
+            }
             
             this.calcularTotaisPresenca();
             return;
@@ -9139,18 +9128,7 @@ class SysControleWeb {
         const funcionarioEmpresa = input.dataset.empresa || '';
         const funcionarioFuncao = input.dataset.funcao || '';
         
-        // ⭐ PRIORIDADE 1: Se tem data-status-original="AZUL", manter AZUL
-        if (input.dataset.statusOriginal === 'AZUL' && valor === '') {
-            valor = 'AZUL';
-        }
-        // ⭐ PRIORIDADE 2: Se tem marcador de azul temporário, usar "AZUL" como status
-        else if (input.dataset.statusAzul === 'true') {
-            valor = 'AZUL';
-            // Limpar marcador após usar
-            delete input.dataset.statusAzul;
-            // Adicionar data-status-original para persistir
-            input.dataset.statusOriginal = 'AZUL';
-        }
+        console.log(`💾 Salvando presença - Func ${funcId} Dia ${dia} Valor: "${valor}" Folga: ${isFolga}`);
         
         // Determinar formatação baseada na classe CSS
         let formatacao = 'normal';
