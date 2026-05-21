@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Limpar Bloqueio</title>
+</head>
+<body>
+    <script>
+        localStorage.removeItem('loginBlock');
+        alert('✅ Bloqueio removido! Redirecionando para o login...');
+        window.location.href = '/login.html';
+    </script>
+</body>
+</html>

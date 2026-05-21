@@ -4,13 +4,53 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FrmConsulta - SysControle</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=2">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏗️</text></svg>">
     <script>
-        // Verificar login antes de carregar a página
+        // Verificar login e interceptar requisições para Multi-Tenant
         (function() {
-            const user = sessionStorage.getItem('user');
-            if (!user) {
+            const userDataStr = sessionStorage.getItem('user');
+            if (!userDataStr) {
+                window.location.href = '/login.html';
+                return;
+            }
+            
+            try {
+                const user = JSON.parse(userDataStr);
+                
+                // ⭐ CORREÇÃO DINÂMICA DE TRANSIÇÃO: Migrar sessão legada sem forçar logout
+                if (user && user.tenant_id === 'ervanio_master') {
+                    user.tenant_id = 'ervanio-1234';
+                    sessionStorage.setItem('user', JSON.stringify(user));
+                }
+                
+                // Interceptar fetch globalmente para injetar o x-tenant-id automaticamente
+                const originalFetch = window.fetch;
+                window.fetch = function(resource, init) {
+                    if (typeof resource === 'string' && resource.startsWith('/api/')) {
+                        init = init || {};
+                        init.headers = init.headers || {};
+                        if (user && user.tenant_id) {
+                            const setHeader = (key, val) => {
+                                if (init.headers instanceof Headers) init.headers.append(key, val);
+                                else if (typeof init.headers.set === 'function') init.headers.set(key, val);
+                                else init.headers[key] = val;
+                            };
+                            setHeader('x-tenant-id', user.tenant_id);
+                            if (user.nome) setHeader('x-user-name', encodeURIComponent(user.nome));
+                            if (user.tipo) setHeader('x-user-tipo', encodeURIComponent(user.tipo));
+                        }
+                    }
+                    return originalFetch(resource, init);
+                };
+
+                // Loop de Heartbeat Real-time (mantém status "online" no painel do gestor)
+                setInterval(() => {
+                    fetch('/api/auth/check').catch(() => {});
+                }, 30000); // Dispara a cada 30 segs para manter a bolinha verde
+            } catch (err) {
+                console.error('Erro no interceptor de tenant:', err);
+                sessionStorage.removeItem('user');
                 window.location.href = '/login.html';
             }
         })();
@@ -29,6 +69,56 @@
                 padding: 50px;
             }
         }
+        /* Watermark para certificados inválidos */
+        .watermark-invalido {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-35deg);
+            font-size: 70pt;
+            font-weight: 900;
+            color: rgba(139, 0, 0, 0.35); /* Padronizado com o Vencido */
+            z-index: 9999;
+            pointer-events: none;
+            white-space: nowrap;
+            text-transform: uppercase;
+            border: 12px solid rgba(139, 0, 0, 0.35);
+            padding: 20px 50px;
+            border-radius: 20px;
+            user-select: none;
+            letter-spacing: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Watermark para certificados vencidos (Vermelho mais escuro) */
+        .watermark-vencido {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-35deg);
+            font-size: 70pt;
+            font-weight: 900;
+            color: rgba(139, 0, 0, 0.35); /* DarkRed mais visível */
+            z-index: 9998;
+            pointer-events: none;
+            white-space: nowrap;
+            text-transform: uppercase;
+            border: 12px solid rgba(139, 0, 0, 0.35);
+            padding: 20px 50px;
+            border-radius: 20px;
+            user-select: none;
+            letter-spacing: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Deslocamento se ambos existirem */
+        .watermark-invalido + .watermark-vencido {
+            transform: translate(-45%, -40%) rotate(-35deg);
+        }
     </style>
 </head>
 <body>
@@ -39,6 +129,9 @@
             <div class="title-bar-menu">
                 <button class="title-bar-btn" onclick="syscontrole.abrirControlePresenca()" title="Controle de Presença">
                     <span>📋</span> Presença
+                </button>
+                <button class="title-bar-btn btn-sempre-visivel" onclick="syscontrole.abrirFormularios()" title="Formulários - OS e PT" id="btnFormularios">
+                    <span>📝</span> Formulário
                 </button>
                 <button class="title-bar-btn" onclick="syscontrole.abrirTabelaMes()" title="Monitoramento de 30 Dias">
                     <span>📊</span> Mês
@@ -405,7 +498,6 @@
                     <div class="indicator-circle vencido"></div>
                     <div class="indicator-circle cancelado"></div>
                 </div>
-            </div>
         </div>
     </div>
     
@@ -414,30 +506,30 @@
         <div class="modal-content form-modal">
             <div class="modal-header">
                 <h2 id="modalTitle">FrmPrincipal</h2>
-                <span class="modal-close">&times;</span>
+                <span class="modal-close" tabindex="-1">&times;</span>
             </div>
             
             <!-- Abas do formulário -->
             <div class="form-tabs">
-                <button type="button" class="tab-btn active" data-tab="cursos">Cursos</button>
-                <button type="button" class="tab-btn" data-tab="fornecedor">Fornecedor</button>
-                <button type="button" class="tab-btn" data-tab="documentacao">Documentação</button>
+                <button type="button" class="tab-btn active" data-tab="cursos" tabindex="-1">Cursos</button>
+                <button type="button" class="tab-btn" data-tab="fornecedor" tabindex="-1">Fornecedor</button>
+                <button type="button" class="tab-btn" data-tab="documentacao" tabindex="-1">Documentação</button>
             </div>
             
             <!-- Abas das NRs -->
             <div class="nr-tabs">
-                <button type="button" class="nr-tab active" data-nr="aso">ASO</button>
-                <button type="button" class="nr-tab" data-nr="nr06">NR-06</button>
-                <button type="button" class="nr-tab" data-nr="nr10">NR-10</button>
-                <button type="button" class="nr-tab" data-nr="nr11">NR-11</button>
-                <button type="button" class="nr-tab" data-nr="nr12">NR-12</button>
-                <button type="button" class="nr-tab" data-nr="nr17">NR-17</button>
-                <button type="button" class="nr-tab" data-nr="nr18">NR-18</button>
-                <button type="button" class="nr-tab" data-nr="nr20">NR-20</button>
-                <button type="button" class="nr-tab" data-nr="nr33">NR-33</button>
-                <button type="button" class="nr-tab" data-nr="nr34">NR-34</button>
-                <button type="button" class="nr-tab" data-nr="nr35">NR-35</button>
-                <button type="button" class="nr-tab" data-nr="epi">EPI</button>
+                <button type="button" class="nr-tab active" data-nr="aso" tabindex="-1">ASO</button>
+                <button type="button" class="nr-tab" data-nr="nr06" tabindex="-1">NR-06</button>
+                <button type="button" class="nr-tab" data-nr="nr10" tabindex="-1">NR-10</button>
+                <button type="button" class="nr-tab" data-nr="nr11" tabindex="-1">NR-11</button>
+                <button type="button" class="nr-tab" data-nr="nr12" tabindex="-1">NR-12</button>
+                <button type="button" class="nr-tab" data-nr="nr17" tabindex="-1">NR-17</button>
+                <button type="button" class="nr-tab" data-nr="nr18" tabindex="-1">NR-18</button>
+                <button type="button" class="nr-tab" data-nr="nr20" tabindex="-1">NR-20</button>
+                <button type="button" class="nr-tab" data-nr="nr33" tabindex="-1">NR-33</button>
+                <button type="button" class="nr-tab" data-nr="nr34" tabindex="-1">NR-34</button>
+                <button type="button" class="nr-tab" data-nr="nr35" tabindex="-1">NR-35</button>
+                <button type="button" class="nr-tab" data-nr="epi" tabindex="-1">EPI</button>
             </div>
             
             <form id="formSSMA" enctype="multipart/form-data">
@@ -514,6 +606,13 @@
                                                 <label for="ambNao">Não</label>
                                             </div>
                                         </div>
+                                        
+                                        <div class="field-group checkbox-group" style="margin-left: 15px; display: flex; flex-direction: column; justify-content: flex-end;">
+                                            <div style="display: flex; align-items: center; gap: 5px; height: 32px;">
+                                                <input type="checkbox" id="ignorarInvalidez" name="ignorarInvalidez" style="width: 16px; height: 16px; cursor: pointer; margin: 0;">
+                                                <label for="ignorarInvalidez" style="font-size: 11px; font-weight: bold; color: #ff9800; cursor: pointer; margin: 0; white-space: nowrap;">Ignorar Invalidez</label>
+                                            </div>
+                                        </div>
                                     </div>
                                     
                                     <!-- Linha 1: Status + Celular + CPF + Datas + Botão Status -->
@@ -575,6 +674,8 @@
                                     <div class="buttons-row">
                                         <button type="button" class="btn-form btn-novo" tabindex="-1">Novo</button>
                                         <button type="submit" id="btnSalvar" class="btn-form btn-cadastrar" tabindex="-1">Cadastrar</button>
+                                        <button type="button" id="btnFichaEpi" onclick="syscontrole.abrirFichaEPI()" style="background: #e74c3c; color: white; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; margin-left: 5px;">FICHA DE EPI</button>
+                                        <button type="button" id="btnOS" onclick="if(syscontrole.abrirOrdemDeServico) syscontrole.abrirOrdemDeServico(); else console.error('abrirOrdemDeServico not found')" style="background: #f39c12; color: white; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; margin-left: 5px;">ORDEM DE SERVIÇO</button>
                                     </div>
                                 </div>
                             </div>
@@ -643,17 +744,23 @@
                                                 <option value="Vencido">Vencido</option>
                                             </select>
                                         </div>
+                                        <div class="field-group" style="display: flex; align-items: center; gap: 8px; margin-top: 15px; border: 2px solid #ff0000; padding: 2px 8px; border-radius: 4px; height: 26px; cursor: pointer;" onclick="document.getElementById('nr06_validade2anos').click()">
+                                            <input type="checkbox" id="nr06_validade2anos" name="nr06_validade2anos" style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="event.stopPropagation()">
+                                            <label for="nr06_validade2anos" style="font-size: 11px; font-weight: bold; color: #ff0000; cursor: pointer; margin: 0; white-space: nowrap;">2 Anos</label>
+                                        </div>
                                     </div>
                                     
                                     <!-- Botões -->
                                     <div class="buttons-row">
                                         <button type="button" class="btn-form btn-novo">Novo</button>
                                         <button type="submit" id="btnSalvarNr06" class="btn-form btn-cadastrar">Cadastrar</button>
+                                        <button type="button" onclick="syscontrole.abrirCertNR06()" style="background:#f39c12;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;">Certificado</button>
+                                        <button type="button" onclick="syscontrole.abrirLPTNR06()" style="background:#2980b9;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:5px;">Lista de Presença</button>
+                                        <button type="button" onclick="syscontrole.abrirCfgNR06()" style="background:#7f8c8d; color:#fff; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; margin-left:5px;">Configura&ccedil;&atilde;o</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        
                         <!-- Aba NR-10 -->
                         <div class="nr-content" id="content-nr10">
                             <div class="nr10-layout">
@@ -720,10 +827,15 @@
                                     </div>
                                     
                                     <!-- Botões -->
-                                    <div class="buttons-row">
+                                    
+                                    <div class="buttons-row" style="display:flex; gap:10px; align-items:center;">
                                         <button type="button" class="btn-form btn-novo">Novo</button>
                                         <button type="submit" id="btnSalvarNr10" class="btn-form btn-cadastrar">Cadastrar</button>
+                                        <button type="button" onclick="syscontrole.abrirCertNR10()" style="background:#f39c12;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;">Certificado</button>
+                                        <button type="button" onclick="syscontrole.abrirLPTNR10()" style="background:#2980b9;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:5px;">Lista de Presença</button>
+                                        <button type="button" onclick="syscontrole.abrirCfgNR10()" style="background:#7f8c8d; color:#fff; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; margin-left:5px;">Configura&ccedil;&atilde;o</button>
                                     </div>
+
                                 </div>
                             </div>
                         </div>
@@ -797,6 +909,9 @@
                                     <div class="buttons-row">
                                         <button type="button" class="btn-form btn-novo">Novo</button>
                                         <button type="submit" id="btnSalvarNr11" class="btn-form btn-cadastrar">Cadastrar</button>
+                                        <button type="button" onclick="syscontrole.abrirCertNR11()" style="background:#f39c12;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:5px;">Certificado</button>
+                                        <button type="button" onclick="syscontrole.abrirLPTNR11()" style="background:#2980b9;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:5px;">Lista de Presença</button>
+                                        <button type="button" onclick="syscontrole.abrirCfgNR11()" style="background:#7f8c8d; color:#fff; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; margin-left:5px;">Configura&ccedil;&atilde;o</button>
                                     </div>
                                 </div>
                             </div>
@@ -862,7 +977,7 @@
                                                 <option value="Vencido">Vencido</option>
                                             </select>
                                         </div>
-                                    </div>
+                                        </div>
                                     
                                     <!-- Campo Ferramenta (específico da NR-12) -->
                                     <div class="ferramenta-section">
@@ -874,6 +989,9 @@
                                     <div class="buttons-row">
                                         <button type="button" class="btn-form btn-novo">Novo</button>
                                         <button type="submit" id="btnSalvarNr12" class="btn-form btn-cadastrar">Cadastrar</button>
+                                        <button type="button" onclick="syscontrole.abrirCertNR12()" style="background:#f39c12;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;">Certificado</button>
+                                        <button type="button" onclick="syscontrole.abrirLPTNR12()" style="background:#2980b9;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:5px;">Lista de Presença</button>
+                                        <button type="button" onclick="syscontrole.abrirCfgNR12()" style="background:#7f8c8d; color:#fff; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; margin-left:5px;">Configura&ccedil;&atilde;o</button>
                                     </div>
                                 </div>
                             </div>
@@ -948,6 +1066,9 @@
                                     <div class="buttons-row">
                                         <button type="button" class="btn-form btn-novo">Novo</button>
                                         <button type="submit" id="btnSalvarNr17" class="btn-form btn-cadastrar">Cadastrar</button>
+                                        <button type="button" onclick="syscontrole.abrirCertNR17()" style="background:#f39c12;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:5px;">Certificado</button>
+                                        <button type="button" onclick="syscontrole.abrirLPTNR17()" style="background:#2980b9;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:5px;">Lista de Presença</button>
+                                        <button type="button" onclick="syscontrole.abrirCfgNR17()" style="background:#7f8c8d; color:#fff; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; margin-left:5px;">Configura&ccedil;&atilde;o</button>
                                     </div>
                                 </div>
                             </div>
@@ -1016,12 +1137,15 @@
                                                 <option value="Vencido">Vencido</option>
                                             </select>
                                         </div>
-                                    </div>
+                                        </div>
                                     
                                     <!-- Botões -->
                                     <div class="buttons-row">
                                         <button type="button" class="btn-form btn-novo">Novo</button>
                                         <button type="submit" id="btnSalvarNr18" class="btn-form btn-cadastrar">Cadastrar</button>
+                                        <button type="button" onclick="syscontrole.abrirCertNR18()" style="background:#f39c12;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;">Certificado</button>
+                                        <button type="button" class="btn-form btn-lpt" onclick="syscontrole.abrirLPTNR18()" style="background: #2980b9; color: white;">Lista de Presença</button>
+                                        <button type="button" onclick="syscontrole.abrirCfgNR18()" style="background:#7f8c8d; color:#fff; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; margin-left:5px;">Configura&ccedil;&atilde;o</button>
                                     </div>
                                 </div>
                             </div>
@@ -1090,12 +1214,14 @@
                                                 <option value="Vencido">Vencido</option>
                                             </select>
                                         </div>
-                                    </div>
+                                        </div>
                                     
-                                    <!-- Botões -->
                                     <div class="buttons-row">
                                         <button type="button" class="btn-form btn-novo">Novo</button>
                                         <button type="submit" id="btnSalvarNr20" class="btn-form btn-cadastrar">Cadastrar</button>
+                                        <button type="button" onclick="syscontrole.abrirCertNR20()" style="background:#f39c12;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:5px;">Certificado</button>
+                                        <button type="button" onclick="syscontrole.abrirLPTNR20()" style="background:#2980b9;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:5px;">Lista de Presença</button>
+                                        <button type="button" onclick="syscontrole.abrirCfgNR20()" style="background:#7f8c8d; color:#fff; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; margin-left:5px;">Configura&ccedil;&atilde;o</button>
                                     </div>
                                 </div>
                             </div>
@@ -1131,29 +1257,29 @@
                                     </div>
                                     
                                     <!-- Linha de datas NR-33 -->
-                                    <div class="dates-row">
-                                        <div class="field-group">
-                                            <label>Data Emissão</label>
-                                            <input type="text" id="nr33_dataEmissao" placeholder="dd/mm/aaaa" maxlength="10" class="date-input-br nr33-focus" onkeydown="syscontrole.navegarFormulario(event, 'nr33_dataEmissao', 'nr35_dataEmissao')">
-                                        </div>
-                                        
-                                        <div class="field-group">
-                                            <label>Vencimento</label>
-                                            <input type="date" id="nr33_vencimento" name="nr33_vencimento" readonly class="calc-field">
-                                        </div>
-                                        
-                                        <div class="field-group">
-                                            <label>Dias Corridos</label>
-                                            <input type="text" id="nr33_diasCorridos" name="nr33_diasCorridos" readonly class="calc-field">
-                                        </div>
-                                        
-                                        <div class="field-group">
-                                            <label>Dias a Vencer</label>
-                                            <input type="text" id="nr33_diasVencer" name="nr33_diasVencer" readonly class="calc-field">
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Status -->
+                                     <div class="dates-row">
+                                         <div class="field-group">
+                                             <label>Data Emissão</label>
+                                             <input type="text" id="nr33_dataEmissao" placeholder="dd/mm/aaaa" maxlength="10" class="date-input-br nr33-focus" onkeydown="syscontrole.navegarFormulario(event, 'nr33_dataEmissao', 'nr35_dataEmissao')">
+                                         </div>
+                                         
+                                         <div class="field-group">
+                                             <label>Vencimento</label>
+                                             <input type="date" id="nr33_vencimento" name="nr33_vencimento" readonly class="calc-field">
+                                         </div>
+                                         
+                                         <div class="field-group">
+                                             <label>Dias Corridos</label>
+                                             <input type="text" id="nr33_diasCorridos" name="nr33_diasCorridos" readonly class="calc-field">
+                                         </div>
+                                         
+                                         <div class="field-group">
+                                             <label>Dias a Vencer</label>
+                                             <input type="text" id="nr33_diasVencer" name="nr33_diasVencer" readonly class="calc-field">
+                                         </div>
+                                     </div>
+                                     
+                                     <!-- Status -->
                                     <div class="status-row">
                                         <div class="field-group small">
                                             <label>Status</label>
@@ -1164,12 +1290,15 @@
                                                 <option value="Vencido">Vencido</option>
                                             </select>
                                         </div>
-                                    </div>
+                                        </div>
                                     
                                     <!-- Botões -->
                                     <div class="buttons-row">
                                         <button type="button" class="btn-form btn-novo">Novo</button>
                                         <button type="submit" id="btnSalvarNr33" class="btn-form btn-cadastrar">Cadastrar</button>
+                                        <button type="button" onclick="syscontrole.abrirCertNR33()" style="background:#f39c12;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;">Certificado</button>
+                                        <button type="button" class="btn-form btn-lpt" onclick="syscontrole.abrirLPTNR33()" style="background: #2980b9; color: white;">Lista de Presença</button>
+                                        <button type="button" onclick="syscontrole.abrirCfgNR33()" style="background:#7f8c8d; color:#fff; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; margin-left:5px;">Configura&ccedil;&atilde;o</button>
                                     </div>
                                 </div>
                             </div>
@@ -1252,7 +1381,6 @@
                         <!-- Aba NR-35 -->
                         <div class="nr-content" id="content-nr35">
                             <div class="nr35-layout">
-                                <!-- Logo NR-35 -->
                                 <div class="nr35-logo-area">
                                     <div class="nr35-icon">NR<br>35</div>
                                     <div class="logo-id" id="logoIdNr35" style="font-size: 11px; color: #999; text-align: center; margin-top: 4px;">ID: -</div>
@@ -1282,22 +1410,22 @@
                                     <div class="dates-row">
                                         <div class="field-group">
                                             <label>Data Emissão</label>
-                                            <input type="text" id="nr35_dataEmissao" placeholder="dd/mm/aaaa" maxlength="10" class="date-input-br nr35-focus" onkeydown="syscontrole.navegarFormulario(event, 'nr35_dataEmissao', 'epi_dataEmissao')">
+                                            <input type="text" id="nr35_dataEmissao" name="nr35_dataEmissao" placeholder="dd/mm/aaaa" maxlength="10" class="date-input-br nr35-focus" onkeydown="syscontrole.navegarFormulario(event, 'nr35_dataEmissao', 'epi_dataEmissao')">
                                         </div>
                                         
                                         <div class="field-group">
                                             <label>Vencimento</label>
-                                            <input type="date" id="nr35_vencimento" name="nr35_vencimento" readonly class="calc-field">
+                                            <input type="date" id="nr35_vencimento" name="nr35_vencimento" readonly class="calc-field" onkeydown="syscontrole.navegarFormulario(event, 'nr35_vencimento', 'nr35_diasCorridos')">
                                         </div>
                                         
                                         <div class="field-group">
                                             <label>Dias Corridos</label>
-                                            <input type="text" id="nr35_diasCorridos" name="nr35_diasCorridos" readonly class="calc-field">
+                                            <input type="text" id="nr35_diasCorridos" name="nr35_diasCorridos" readonly class="calc-field" onkeydown="syscontrole.navegarFormulario(event, 'nr35_diasCorridos', 'nr35_diasVencer')">
                                         </div>
                                         
                                         <div class="field-group">
                                             <label>Dias a Vencer</label>
-                                            <input type="text" id="nr35_diasVencer" name="nr35_diasVencer" readonly class="calc-field">
+                                            <input type="text" id="nr35_diasVencer" name="nr35_diasVencer" readonly class="calc-field" onkeydown="syscontrole.navegarFormulario(event, 'nr35_diasVencer', 'nr35_status')">
                                         </div>
                                     </div>
                                     
@@ -1312,12 +1440,15 @@
                                                 <option value="Vencido">Vencido</option>
                                             </select>
                                         </div>
-                                    </div>
+                                        </div>
                                     
                                     <!-- Botões -->
                                     <div class="buttons-row">
                                         <button type="button" class="btn-form btn-novo">Novo</button>
                                         <button type="submit" id="btnSalvarNr35" class="btn-form btn-cadastrar">Cadastrar</button>
+                                        <button type="button" onclick="syscontrole.abrirCertNR35()" style="background:#f39c12;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;">Certificado</button>
+                                        <button type="button" onclick="syscontrole.abrirLPTNR35()" style="background:#2980b9;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;margin-left:5px;">Lista de Presença</button>
+                                        <button type="button" onclick="syscontrole.abrirCfgNR35()" style="background:#7f8c8d; color:#fff; border:none; padding:6px 14px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold; margin-left:5px;">Configura&ccedil;&atilde;o</button>
                                     </div>
                                 </div>
                             </div>
@@ -1385,6 +1516,10 @@
                                                 <option value="Vencido">Vencido</option>
                                             </select>
                                         </div>
+                                        <div class="field-group" style="display: flex; align-items: center; gap: 8px; margin-top: 15px; border: 2px solid #ff0000; padding: 2px 8px; border-radius: 4px; height: 26px; cursor: pointer;" onclick="document.getElementById('epi_validade8meses').click()">
+                                            <input type="checkbox" id="epi_validade8meses" name="epi_validade8meses" style="width: 16px; height: 16px; cursor: pointer; margin: 0;" onclick="event.stopPropagation()">
+                                            <label for="epi_validade8meses" style="font-size: 11px; font-weight: bold; color: #ff0000; cursor: pointer; margin: 0; white-space: nowrap;">8 Meses</label>
+                                        </div>
                                     </div>
                                     
                                     <!-- Botões -->
@@ -1422,11 +1557,11 @@
                                         <div class="form-line">
                                             <div class="form-field">
                                                 <label>Telefone</label>
-                                                <input type="text" id="fornecedor_telefone" placeholder="(11) 0000-0000">
+                                                <input type="text" id="fornecedor_telefone" placeholder="(11) 0000-0000" maxlength="14">
                                             </div>
                                             <div class="form-field">
                                                 <label>Celular</label>
-                                                <input type="text" id="fornecedor_celular" placeholder="(11) 90000-0000">
+                                                <input type="text" id="fornecedor_celular" placeholder="(11) 90000-0000" maxlength="16">
                                             </div>
                                             <div class="form-field">
                                                 <label>Contato</label>
@@ -1441,7 +1576,6 @@
                                     </div>
                                 </div>
                                 
-                                <!-- Botões, Busca e Filtro em uma linha -->
                                 <div class="fornecedor-footer">
                                     <!-- Esquerda: Botões -->
                                     <div class="buttons-group">
@@ -1880,6 +2014,9 @@
                         <button onclick="syscontrole.trocarAbaRastreamento('historico')" id="abaHistorico" style="flex: 1; padding: 18px; border: none; background: transparent; font-weight: 600; color: #666; cursor: pointer; transition: all 0.3s;">
                             📚 Histórico Completo
                         </button>
+                        <button onclick="syscontrole.trocarAbaRastreamento('auditoria')" id="abaAuditoria" style="flex: 1; padding: 18px; border: none; background: transparent; font-weight: 600; color: #666; cursor: pointer; transition: all 0.3s;">
+                            📜 Auditoria de Ações
+                        </button>
                     </div>
                     
                     <!-- Conteúdo Aba Online -->
@@ -1891,6 +2028,9 @@
                                 </button>
                                 <button onclick="syscontrole.zerarRegistrosRastreamento()" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; background: #f44336; color: white; border: none; cursor: pointer; font-size: 12px;">
                                     <span>🗑️</span> Zerar Registros
+                                </button>
+                                <button id="btnVerOcultos" onclick="syscontrole.toggleOcultosRastreamento()" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; background: #607d8b; color: white; border: none; cursor: pointer; font-size: 12px;">
+                                    <span>👁️</span> Ver Ocultos
                                 </button>
                             </div>
                             <label style="display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: #f0f7ff; border-radius: 8px; cursor: pointer;">
@@ -1905,7 +2045,7 @@
                                     <tr style="background: #667eea; color: white;">
                                         <th style="padding: 10px; text-align: left; font-weight: 500; font-size: 12px;">Status</th>
                                         <th style="padding: 10px; text-align: left; font-weight: 500; font-size: 12px;">Usuário</th>
-                                        <th style="padding: 10px; text-align: center; font-weight: 500; font-size: 12px;">Acessos</th>
+                                        <th style="padding: 10px; text-align: center; font-weight: 500; font-size: 12px;">Acessos Hoje</th>
                                         <th style="padding: 10px; text-align: left; font-weight: 500; font-size: 12px;">IP</th>
                                         <th style="padding: 10px; text-align: left; font-weight: 500; font-size: 12px;">Entrada</th>
                                         <th style="padding: 10px; text-align: left; font-weight: 500; font-size: 12px;">Saída</th>
@@ -1963,6 +2103,46 @@
                                         <td colspan="9" style="text-align: center; padding: 60px; color: #999;">
                                             <div style="font-size: 48px; margin-bottom: 10px;">📚</div>
                                             <div style="font-size: 16px;">Selecione os filtros e clique em "Filtrar"</div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Conteúdo Aba Auditoria -->
+                    <div id="conteudoAuditoria" style="padding: 25px; display: none;">
+                        <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; background: #f9fbfc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                            <div style="position: relative; display: flex; align-items: center;">
+                                <span style="position: absolute; left: 10px; color: #94a3b8;">🔍</span>
+                                <input type="text" id="auditoriaBuscaTexto" placeholder="Buscar em detalhes da ação..." style="padding: 10px 10px 10px 35px; border: 1.5px solid #cbd5e1; border-radius: 6px; font-size: 13px; width: 250px; transition: all 0.2s;" oninput="syscontrole.filtrarLogsAuditoriaLocal()">
+                            </div>
+                            <div style="position: relative; display: flex; align-items: center;">
+                                <span style="position: absolute; left: 10px; color: #94a3b8;">👤</span>
+                                <input type="text" id="auditoriaBuscaUsuario" placeholder="Filtrar por usuário..." style="padding: 10px 10px 10px 35px; border: 1.5px solid #cbd5e1; border-radius: 6px; font-size: 13px; width: 200px; transition: all 0.2s;" oninput="syscontrole.filtrarLogsAuditoriaLocal()">
+                            </div>
+                            <button class="btn btn-primary" onclick="syscontrole.carregarLogsAuditoria()" style="display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 6px; font-size: 13px; font-weight: 500; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                                <span>🔄</span> Recarregar Logs
+                            </button>
+                            <div style="margin-left: auto; font-size: 12px; color: #64748b; font-weight: 500;" id="auditoriaContagem">Mostrando 0 logs</div>
+                        </div>
+                        
+                        <div style="overflow-x: auto; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e2e8f0;">
+                            <table style="width: 100%; border-collapse: collapse; background: white; font-family: system-ui, -apple-system, sans-serif;">
+                                <thead>
+                                    <tr style="background: #ff9800; color: white;">
+                                        <th style="padding: 14px 15px; text-align: left; font-weight: 600; font-size: 13px;">🕒 Data e Hora</th>
+                                        <th style="padding: 14px 15px; text-align: left; font-weight: 600; font-size: 13px;">👤 Usuário</th>
+                                        <th style="padding: 14px 15px; text-align: center; font-weight: 600; font-size: 13px; width: 180px;">⚡ Ação Realizada</th>
+                                        <th style="padding: 14px 15px; text-align: left; font-weight: 600; font-size: 13px;">📝 Detalhes da Operação</th>
+                                        <th style="padding: 14px 15px; text-align: left; font-weight: 600; font-size: 13px;">🌐 IP / Conexão</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="auditoriaTableBody">
+                                    <tr>
+                                        <td colspan="5" style="text-align: center; padding: 60px; color: #64748b;">
+                                            <div style="font-size: 48px; margin-bottom: 12px;">📜</div>
+                                            <div style="font-size: 15px; font-weight: 500;">Carregando registros da auditoria...</div>
                                         </td>
                                     </tr>
                                 </tbody>
@@ -2060,6 +2240,10 @@
                     <label for="configTitulo">Título do Relatório:</label>
                     <input type="text" id="configTitulo" placeholder="Ex: Obra Enkyo Guarulhos" maxlength="100">
                 </div>
+                <div class="config-field">
+                    <label for="configTecnico">Técnico de Segurança:</label>
+                    <input type="text" id="configTecnico" placeholder="Nome do Técnico" maxlength="100">
+                </div>
                 <div class="config-preview">
                     <p><strong>Prévia do Cabeçalho:</strong></p>
                     <div class="preview-header-container">
@@ -2078,12 +2262,21 @@
     
     <!-- Modal Gerenciar Usuários -->
     <div id="modalUsuarios" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 700px;">
+        <div class="modal-content" style="max-width: 1000px; width: 95%;">
             <div class="modal-header" style="background: #87CEEB;">
                 <h2>👥 Gerenciar Usuários</h2>
                 <button class="modal-close" onclick="syscontrole.fecharGerenciarUsuarios()">&times;</button>
             </div>
             <div class="modal-body" style="padding: 20px;">
+                <!-- 🔑 Código de Acesso da Empresa para Funcionários -->
+                <div id="avisoCodigoEmpresa" style="margin-bottom: 15px; padding: 12px; background: #e8f4fd; border-left: 5px solid #1a5276; border-radius: 4px; font-size: 14px; color: #1a5276; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    <div>
+                        <strong>🔑 Chave da Empresa (Código de Acesso):</strong> 
+                        <span id="displayCodigoTenant" style="font-family: monospace; background: #fff; padding: 4px 10px; border: 1px dashed #1a5276; border-radius: 4px; font-weight: bold; margin-left: 5px; color: #1a5276; font-size:15px;">Carregando...</span>
+                    </div>
+                    <small style="color: #555; font-size: 11px; font-style: italic;">(Forneça este código e a senha para o funcionário acessar)</small>
+                </div>
+
                 <div style="margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 5px;">
                     <h4 style="margin-bottom: 10px;">Novo Usuário</h4>
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto auto; gap: 10px; align-items: end;">
@@ -2114,10 +2307,11 @@
                     <thead>
                         <tr style="background: #87CEEB;">
                             <th style="padding: 10px; text-align: left;">Login</th>
+                            <th style="padding: 10px; text-align: left;">Senha</th>
                             <th style="padding: 10px; text-align: left;">Nome</th>
                             <th style="padding: 10px; text-align: center;">Tipo</th>
                             <th style="padding: 10px; text-align: center;">Status</th>
-                            <th style="padding: 10px; text-align: center;">Ações</th>
+                            <th style="padding: 10px; text-align: center; min-width: 220px;">Ações</th>
                         </tr>
                     </thead>
                     <tbody id="listaUsuarios"></tbody>
@@ -2220,18 +2414,15 @@
         <div class="modal-content modal-tabela-mes">
             <div class="modal-header">
                 <h2>📊 Monitoramento de 30 Dias</h2>
-                <span class="modal-close" onclick="syscontrole.fecharTabelaMes()">&times;</span>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button class="btn btn-primary btn-sm" onclick="syscontrole.exportarTabelaMes()" style="margin: 0; padding: 2px 10px; font-size: 11px; display: flex; align-items: center; gap: 5px; background-color: #4a90e2; border-color: #357abd;">
+                        <span>📥</span> Exportar Excel
+                    </button>
+                    <span class="modal-close" onclick="syscontrole.fecharTabelaMes()">&times;</span>
+                </div>
             </div>
             <div class="modal-body modal-body-tabela-mes">
-                <div class="mes-toolbar">
-                    <div class="mes-filtros">
-                        <input type="text" id="mesFiltroNome" placeholder="Buscar Nome..." class="mes-filtro-input" oninput="syscontrole.filtrarTabelaMes()">
-                        <input type="text" id="mesFiltroEmpresa" placeholder="Buscar Empresa..." class="mes-filtro-input" oninput="syscontrole.filtrarTabelaMes()">
-                        <input type="text" id="mesFiltroFuncao" placeholder="Buscar Função..." class="mes-filtro-input" oninput="syscontrole.filtrarTabelaMes()">
-                        <button class="btn btn-sm" onclick="syscontrole.limparFiltrosTabelaMes()">Limpar</button>
-                    </div>
-                    <button class="btn btn-primary btn-sm" onclick="syscontrole.exportarTabelaMes()">📥 Exportar Excel</button>
-                </div>
+
                 <div class="mes-table-container">
                     <table id="tabelaMes" class="tabela-mes">
                         <thead id="mesHeader"></thead>
@@ -2243,8 +2434,1461 @@
     </div>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="script.js?v=15"></script>
     <script src="anti-flicker.js"></script>
     <script src="search-history.js"></script>
+
+    <!-- Modal Configuracao NR-06 -->
+    <div id="modalCfgNR06" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:100001;overflow:auto;">
+        <div style="background:#fff;margin:20px auto;max-width:650px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #34495e;">
+                <h3 style="margin:0; color:#ecf0f1; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight:600; font-size: 18px;">Configuração do Certificado NR-06</h3>
+                <span onclick="document.getElementById('modalCfgNR06').style.display='none'" style="color:#bdc3c7; font-size:28px; cursor:pointer; transition:0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#bdc3c7'">&times;</span>
+            </div>
+            <div style="padding:15px; display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <!-- Linha 1 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Instrutor</label>
+                    <input id="cfg06_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Instrutor</label>
+                    <input id="cfg06_cargo_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 2 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. MTE Instrutor</label>
+                    <input id="cfg06_reg_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Responsavel Tecnico</label>
+                    <input id="cfg06_responsavel" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 3 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Responsavel</label>
+                    <input id="cfg06_cargo_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. CREA</label>
+                    <input id="cfg06_reg_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 4 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Local</label>
+                    <input id="cfg06_local" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">UF</label>
+                    <input id="cfg06_uf" type="text" value="SP" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+
+                <!-- Ano Management (NEW) -->
+                <div style="grid-column: span 2; background:#f0f7ff; border:1px solid #cce5ff; border-radius:8px; padding:12px; margin-top:5px;">
+                    <label style="font-size:12px; font-weight:700; color:#004085; display:block; margin-bottom:8px; border-bottom:1px solid #b8daff; padding-bottom:5px;">📅 Gerenciar Anos do Certificado</label>
+                    <div style="display:flex; gap:15px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Ano Ativo:</label>
+                            <div style="display:flex; gap:5px;">
+                                <select id="cfg06_ano_ativo" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; background:#fff; height:32px;">
+                                    <!-- Dinâmico -->
+                                </select>
+                                <button type="button" onclick="syscontrole.removerAnoSelecionado06()" style="background:#d9534f; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-size:20px; font-weight:bold; height:32px;" title="Excluir Ano selecionado">-</button>
+                            </div>
+                        </div>
+                        <div style="flex:1; border-left:1px solid #b8daff; padding-left:15px;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Novo Ano:</label>
+                            <div style="display:flex; gap:5px;">
+                                <input id="cfg06_novo_ano" type="number" placeholder="Ex: 2026" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; height:32px;">
+                                <button type="button" onclick="syscontrole.adicionarAno06()" style="background:#007bff; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-weight:bold; height:32px;">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logo Section -->
+                <div style="grid-column: span 2; display:flex; gap:15px; align-items:center; padding:10px; background:#fcfcfc; border-radius:8px; border:1px solid #eee; margin-top:5px;">
+                    <div id="cfg06_logo_preview_container" style="width:70px;height:70px;border:1px solid #dee2e6;border-radius:4px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+                        <img id="cfg06_logo_preview" src="/Logo-Hoss.jpg" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;">
+                    </div>
+                    <div style="flex:1;">
+                        <input type="file" id="cfg06_logo_file" accept="image/*" style="display:none;" onchange="syscontrole.processarLogoUpload(this)">
+                        <button type="button" onclick="document.getElementById('cfg06_logo_file').click()" style="background:#4a90e2;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px;">📷 Alterar Logo</button>
+                        <div style="font-size:10px;color:#999;margin-top:4px;">A imagem será salva no sistema.</div>
+                        <input id="cfg06_logo" type="hidden">
+                    </div>
+                    <div style="text-align:right;">
+                        <button onclick="syscontrole.salvarCfgNR06()" style="background:#27ae60;color:#fff;border:none;padding:10px 25px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;box-shadow:0 2px 4px rgba(39,174,96,0.3);">Salvar Tudo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Certificado NR-06 -->
+    <div id="modalCertNR06" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <button onclick="syscontrole.abrirCfgNR06()" class="btn-cfg-mobile-hide" style="background:#444; color:#fff; border:1px solid #666; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px; transition:0.2s;">⚙️ Configuração</button>
+            <span onclick="syscontrole.fecharCertNR06()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:800px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50;color:#fff;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
+                <strong>Certificado NR-06</strong>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <label style="font-size:12px;">N&ordm;:</label>
+                    <input id="cert06_num" type="text" oninput="syscontrole.renderCertNR06(); syscontrole.verificarESalvarNumeroControle('nr06', this.value, this, true)" onblur="syscontrole.verificarESalvarNumeroControle('nr06', this.value, this, false)" style="padding:4px 8px;border:1px solid #fff;border-radius:4px;width:80px;background:rgba(255,255,255,0.2);color:#fff;">
+                    <button onclick="syscontrole.abrirCfgNR06()" class="btn-cfg-mobile-hide" style="background:#f39c12;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Configuracao</button>
+                    <button onclick="document.getElementById('modalCertNR06').style.display='none'" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">&times;</button>
+                </div>
+            </div>
+            <div id="certNR06_preview" style="padding:30px;font-family:'Times New Roman',serif;overflow:auto;max-height:80vh;"></div>
+        </div>
+    </div>
+
+    <!-- Modal Lista de Presença NR-06 (LPT) -->
+    <div id="modalLPTNR06" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+
+            <span onclick="syscontrole.fecharLPTNR06()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:850px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; color:#fff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1a252f;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="background:#2980b9; color:#fff; padding:4px 8px; border-radius:4px; font-weight:bold; font-size:12px;">LPT</div>
+                    <strong style="font-size:16px;">Lista de Presença NR-06</strong>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="window.print()" style="background:#27ae60; color:#fff; border:none; padding:8px 18px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:13px; display:flex; align-items:center; gap:8px; transition:0.2s;" onmouseover="this.style.background='#219150'" onmouseout="this.style.background='#27ae60'">
+                        <span>🖨️</span> Imprimir Lista
+                    </button>
+                </div>
+            </div>
+            <div id="lptNR06_preview" style="background:#fff; min-height:600px; padding:0; overflow-y:auto; max-height:calc(95vh - 80px);">
+                <!-- Conteúdo da Lista será renderizado aqui -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Configuracao NR-12 -->
+    <div id="modalCfgNR12" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:100001;overflow:auto;">
+        <div style="background:#fff;margin:20px auto;max-width:650px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #34495e;">
+                <h3 style="margin:0; color:#ecf0f1; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight:600; font-size: 18px;">Configuração do Certificado NR-12</h3>
+                <span onclick="document.getElementById('modalCfgNR12').style.display='none'" style="color:#bdc3c7; font-size:28px; cursor:pointer; transition:0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#bdc3c7'">&times;</span>
+            </div>
+            <div style="padding:15px; display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <!-- Linha 1 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Instrutor</label>
+                    <input id="cfg12_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Instrutor</label>
+                    <input id="cfg12_cargo_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 2 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. MTE Instrutor</label>
+                    <input id="cfg12_reg_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Responsavel Tecnico</label>
+                    <input id="cfg12_responsavel" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 3 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Responsavel</label>
+                    <input id="cfg12_cargo_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. CREA</label>
+                    <input id="cfg12_reg_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 4 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Local</label>
+                    <input id="cfg12_local" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">UF</label>
+                    <input id="cfg12_uf" type="text" value="SP" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+
+                <!-- Ano Management -->
+                <div style="grid-column: span 2; background:#f0f7ff; border:1px solid #cce5ff; border-radius:8px; padding:12px; margin-top:5px;">
+                    <label style="font-size:12px; font-weight:700; color:#004085; display:block; margin-bottom:8px; border-bottom:1px solid #b8daff; padding-bottom:5px;">📅 Gerenciar Anos do Certificado</label>
+                    <div style="display:flex; gap:15px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Ano Ativo:</label>
+                            <div style="display:flex; gap:5px;">
+                                <select id="cfg12_ano_ativo" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; background:#fff; height:32px;">
+                                    <!-- Dinâmico -->
+                                </select>
+                                <button type="button" onclick="syscontrole.removerAnoSelecionado12()" style="background:#d9534f; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-size:20px; font-weight:bold; height:32px;" title="Excluir Ano selecionado">-</button>
+                            </div>
+                        </div>
+                        <div style="flex:1; border-left:1px solid #b8daff; padding-left:15px;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Novo Ano:</label>
+                            <div style="display:flex; gap:5px;">
+                                <input id="cfg12_novo_ano" type="number" placeholder="Ex: 2026" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; height:32px;">
+                                <button type="button" onclick="syscontrole.adicionarAno12()" style="background:#007bff; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-weight:bold; height:32px;">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logo Section -->
+                <div style="grid-column: span 2; display:flex; gap:15px; align-items:center; padding:10px; background:#fcfcfc; border-radius:8px; border:1px solid #eee; margin-top:5px;">
+                    <div id="cfg12_logo_preview_container" style="width:70px;height:70px;border:1px solid #dee2e6;border-radius:4px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+                        <img id="cfg12_logo_preview" src="/Logo-Hoss.jpg" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;">
+                    </div>
+                    <div style="flex:1;">
+                        <input type="file" id="cfg12_logo_file" accept="image/*" style="display:none;" onchange="syscontrole.processarLogoUploadNR12(this)">
+                        <button type="button" onclick="document.getElementById('cfg12_logo_file').click()" style="background:#4a90e2;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px;">📷 Alterar Logo</button>
+                        <div style="font-size:10px;color:#999;margin-top:4px;">A imagem será salva no sistema.</div>
+                        <input id="cfg12_logo" type="hidden">
+                    </div>
+                    <div style="text-align:right;">
+                        <button onclick="syscontrole.salvarCfgNR12()" style="background:#27ae60;color:#fff;border:none;padding:10px 25px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;box-shadow:0 2px 4px rgba(39,174,96,0.3);">Salvar Tudo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Certificado NR-12 -->
+    <div id="modalCertNR12" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <button onclick="syscontrole.abrirCfgNR12()" class="btn-cfg-mobile-hide" style="background:#444; color:#fff; border:1px solid #666; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px; transition:0.2s;">⚙️ Configuração</button>
+            <span onclick="syscontrole.fecharCertNR12()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:800px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50;color:#fff;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
+                <strong>Certificado NR-12</strong>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <label style="font-size:12px;">N&ordm;:</label>
+                    <input id="cert12_num" type="text" oninput="syscontrole.renderCertNR12(); syscontrole.verificarESalvarNumeroControle('nr12', this.value, this, true)" onblur="syscontrole.verificarESalvarNumeroControle('nr12', this.value, this, false)" style="padding:4px 8px;border:1px solid #fff;border-radius:4px;width:80px;background:rgba(255,255,255,0.2);color:#fff;">
+                    <button onclick="syscontrole.abrirCfgNR12()" class="btn-cfg-mobile-hide" style="background:#f39c12;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Configuracao</button>
+                    <button onclick="document.getElementById('modalCertNR12').style.display='none'" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">&times;</button>
+                </div>
+            </div>
+            <div id="certNR12_preview" style="padding:30px;font-family:'Times New Roman',serif;overflow:auto;max-height:80vh;"></div>
+        </div>
+    </div>
+
+    <!-- Modal Lista de Presença NR-12 (LPT) -->
+    <div id="modalLPTNR12" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+
+            <span onclick="syscontrole.fecharLPTNR12()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:850px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; color:#fff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1a252f;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="background:#2980b9; color:#fff; padding:4px 8px; border-radius:4px; font-weight:bold; font-size:12px;">LPT</div>
+                    <strong style="font-size:16px;">Lista de Presença NR-12</strong>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="window.print()" style="background:#27ae60; color:#fff; border:none; padding:8px 18px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:13px; display:flex; align-items:center; gap:8px; transition:0.2s;" onmouseover="this.style.background='#219150'" onmouseout="this.style.background='#27ae60'">
+                        <span>🖨️</span> Imprimir Lista
+                    </button>
+                </div>
+            </div>
+            <div id="lptNR12_preview" style="background:#fff; min-height:600px; padding:0; overflow-y:auto; max-height:calc(95vh - 80px);">
+                <!-- Conteúdo da Lista será renderizado aqui -->
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <script src="script.js?v=28"></script>
+    
+    <!-- MODAIS NR-10 (PADRÃO HOSS) -->
+    <!-- Modal Configuração NR-10 -->
+    <div id="modalCfgNR10" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:100001;overflow:auto;">
+        <div style="background:#fff;margin:20px auto;max-width:650px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #34495e;">
+                <h3 style="margin:0; color:#ecf0f1; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight:600; font-size: 18px;">Configuração do Certificado NR-10</h3>
+                <span onclick="document.getElementById('modalCfgNR10').style.display='none'" style="color:#bdc3c7; font-size:28px; cursor:pointer; transition:0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#bdc3c7'">&times;</span>
+            </div>
+            <div style="padding:15px; display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <!-- Linha 1 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Instrutor</label>
+                    <input id="cfg10_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Instrutor</label>
+                    <input id="cfg10_cargo_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 2 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. MTE Instrutor</label>
+                    <input id="cfg10_reg_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Responsavel Tecnico</label>
+                    <input id="cfg10_responsavel" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 3 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Responsavel</label>
+                    <input id="cfg10_cargo_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. CREA</label>
+                    <input id="cfg10_reg_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 4 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Local</label>
+                    <input id="cfg10_local" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">UF</label>
+                    <input id="cfg10_uf" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+
+                <!-- Ano Management -->
+                <div style="grid-column: span 2; background:#f0f7ff; border:1px solid #cce5ff; border-radius:8px; padding:12px; margin-top:5px;">
+                    <label style="font-size:12px; font-weight:700; color:#004085; display:block; margin-bottom:8px; border-bottom:1px solid #b8daff; padding-bottom:5px;">📅 Gerenciar Anos do Certificado</label>
+                    <div style="display:flex; gap:15px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Ano Ativo:</label>
+                            <div style="display:flex; gap:5px;">
+                                <select id="cfg10_ano_ativo" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; background:#fff; height:32px;">
+                                    <!-- Dinâmico -->
+                                </select>
+                                <button type="button" onclick="syscontrole.removerAnoSelecionado10()" style="background:#d9534f; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-size:20px; font-weight:bold; height:32px;" title="Remover este ano">-</button>
+                            </div>
+                        </div>
+                        <div style="flex:1; border-left:1px solid #b8daff; padding-left:15px;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Novo Ano:</label>
+                            <div style="display:flex; gap:5px;">
+                                <input id="cfg10_novo_ano" type="number" placeholder="Ex: 2026" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; height:32px;">
+                                <button type="button" onclick="syscontrole.adicionarAno10()" style="background:#007bff; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-weight:bold; height:32px;">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modelo Section (Compactada para não distorcer) -->
+                <div style="grid-column: span 2; padding:10px; background:#f8f9fa; border-radius:8px; border:1px solid #e9ecef; margin-top:5px;">
+                    <div style="display:none;">
+                        <textarea id="cfg10_txt_basico"></textarea>
+                        <textarea id="cfg10_txt_sep"></textarea>
+                        <textarea id="cfg10_txt_recicle"></textarea>
+                    </div>
+                    <div style="display:flex; gap:12px; align-items:center;">
+                        <span style="font-size:11px; font-weight:bold; color:#555;">Modelo:</span>
+                        <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:3px;"><input type="radio" name="cfg10_modelo_tipo" value="1" id="cfg10_radio_basico" checked> Básico</label>
+                        <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:3px;"><input type="radio" name="cfg10_modelo_tipo" value="2" id="cfg10_radio_sep"> SEP</label>
+                        <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:3px;"><input type="radio" name="cfg10_modelo_tipo" value="3" id="cfg10_radio_recicle"> Reciclagem</label>
+                        <div style="display:flex;align-items:center;gap:5px;margin-left:auto;background:#fff;border:1px solid #ddd;border-radius:4px;padding:2px 8px;">
+                            <span style="font-size:10px;font-weight:bold;color:#666;">Data Fim:</span>
+                            <input type="text" id="cfg10_data_fim" placeholder="dd/mm/aaaa" maxlength="10"
+                                oninput="syscontrole.formatarDataEmissao(event)"
+                                style="width:90px;padding:2px 4px;border:none;font-size:12px;text-align:center;outline:none;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logo Section -->
+                <div style="grid-column: span 2; display:flex; gap:15px; align-items:center; padding:10px; background:#fcfcfc; border-radius:8px; border:1px solid #eee; margin-top:5px;">
+                    <div id="cfg10_logo_preview_container" style="width:70px;height:70px;border:1px solid #dee2e6;border-radius:4px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+                        <img id="cfg10_logo_preview" src="/Logo-Hoss.jpg" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;">
+                    </div>
+                    <div style="flex:1;">
+                        <input type="file" id="cfg10_logo_file" accept="image/*" style="display:none;" onchange="syscontrole.processarLogoUpload10(this)">
+                        <button type="button" onclick="document.getElementById('cfg10_logo_file').click()" style="background:#4a90e2;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px;">📷 Alterar Logo</button>
+                        <input id="cfg10_logo" type="hidden">
+                    </div>
+                    <div style="text-align:right;">
+                        <button onclick="syscontrole.salvarCfgNR10()" style="background:#27ae60;color:#fff;border:none;padding:10px 25px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;box-shadow:0 2px 4px rgba(39,174,96,0.3);">Salvar Tudo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Certificado NR-10 -->
+    <div id="modalCertNR10" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <button onclick="syscontrole.abrirCfgNR10()" class="btn-cfg-mobile-hide" style="background:#444; color:#fff; border:1px solid #666; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px; transition:0.2s;">⚙️ Configuração</button>
+            <span onclick="syscontrole.fecharCertNR10()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:800px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50;color:#fff;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
+                <strong>Certificado NR-10</strong>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <label style="font-size:12px;">N&ordm;:</label>
+                    <input id="cert10_num" type="text" oninput="syscontrole.renderCertNR10(); syscontrole.verificarESalvarNumeroControle('nr10', this.value, this, true)" onblur="syscontrole.verificarESalvarNumeroControle('nr10', this.value, this, false)" style="padding:4px 8px;border:1px solid #fff;border-radius:4px;width:80px;background:rgba(255,255,255,0.2);color:#fff;">
+                    <button type="button" onclick="syscontrole.abrirCfgNR10()" class="btn-cfg-mobile-hide" style="background:#f39c12;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Configuração</button>
+                    <button type="button" onclick="syscontrole.fecharCertNR10()" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">&times;</button>
+                </div>
+            </div>
+            <div id="certNR10_preview" style="padding:30px;font-family:'Times New Roman',serif;overflow:auto;max-height:80vh;"></div>
+        </div>
+    </div>
+
+    <!-- Modal Lista de Presença NR-10 (LPT) -->
+    <div id="modalLPTNR10" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+
+            <span onclick="syscontrole.fecharLPTNR10()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:850px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; color:#fff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1a252f;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="background:#2980b9; color:#fff; padding:4px 8px; border-radius:4px; font-weight:bold; font-size:12px;">LPT</div>
+                    <strong style="font-size:16px;">Lista de Presença NR-10</strong>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="window.print()" style="background:#27ae60; color:#fff; border:none; padding:8px 18px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:13px; display:flex; align-items:center; gap:8px; transition:0.2s;" onmouseover="this.style.background='#219150'" onmouseout="this.style.background='#27ae60'">
+                        <span>🖨️</span> Imprimir Lista
+                    </button>
+                </div>
+            </div>
+            <div id="lptNR10_preview" style="background:#fff; min-height:600px; padding:0; overflow-y:auto; max-height:calc(95vh - 80px);"></div>
+        </div>
+    </div>
+
+    <script src="cert-nr10.js"></script>
+
+    <!-- Modal Configuracao NR-18 -->
+    <div id="modalCfgNR18" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:100001;overflow:auto;">
+        <div style="background:#fff;margin:20px auto;max-width:650px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #34495e;">
+                <h3 style="margin:0; color:#ecf0f1; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight:600; font-size: 18px;">Configuração do Certificado NR-18</h3>
+                <span onclick="document.getElementById('modalCfgNR18').style.display='none'" style="color:#bdc3c7; font-size:28px; cursor:pointer; transition:0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#bdc3c7'">&times;</span>
+            </div>
+            <div style="padding:15px; display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <!-- Linha 1 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Instrutor</label>
+                    <input id="cfg18_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Instrutor</label>
+                    <input id="cfg18_cargo_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 2 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. MTE Instrutor</label>
+                    <input id="cfg18_reg_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Responsavel Tecnico</label>
+                    <input id="cfg18_responsavel" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 3 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Responsavel</label>
+                    <input id="cfg18_cargo_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. CREA</label>
+                    <input id="cfg18_reg_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 4 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Local</label>
+                    <input id="cfg18_local" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">UF</label>
+                    <input id="cfg18_uf" type="text" value="SP" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+
+                <!-- Ano Management -->
+                <div style="grid-column: span 2; background:#f0f7ff; border:1px solid #cce5ff; border-radius:8px; padding:12px; margin-top:5px;">
+                    <label style="font-size:12px; font-weight:700; color:#004085; display:block; margin-bottom:8px; border-bottom:1px solid #b8daff; padding-bottom:5px;">📅 Gerenciar Anos do Certificado</label>
+                    <div style="display:flex; gap:15px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Ano Ativo:</label>
+                            <div style="display:flex; gap:5px;">
+                                <select id="cfg18_ano_ativo" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; background:#fff; height:32px;">
+                                    <!-- Dinâmico -->
+                                </select>
+                                <button type="button" onclick="syscontrole.removerAnoSelecionado18()" style="background:#d9534f; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-size:20px; font-weight:bold; height:32px;" title="Excluir Ano selecionado">-</button>
+                            </div>
+                        </div>
+                        <div style="flex:1; border-left:1px solid #b8daff; padding-left:15px;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Novo Ano:</label>
+                            <div style="display:flex; gap:5px;">
+                                <input id="cfg18_novo_ano" type="number" placeholder="Ex: 2026" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; height:32px;">
+                                <button type="button" onclick="syscontrole.adicionarAno18()" style="background:#007bff; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-weight:bold; height:32px;">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logo Section -->
+                <div style="grid-column: span 2; display:flex; gap:15px; align-items:center; padding:10px; background:#fcfcfc; border-radius:8px; border:1px solid #eee; margin-top:5px;">
+                    <div id="cfg18_logo_preview_container" style="width:70px;height:70px;border:1px solid #dee2e6;border-radius:4px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+                        <img id="cfg18_logo_preview" src="/Logo-Hoss.jpg" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;">
+                    </div>
+                    <div style="flex:1;">
+                        <input type="file" id="cfg18_logo_file" accept="image/*" style="display:none;" onchange="syscontrole.processarLogoUploadNR18(this)">
+                        <button type="button" onclick="document.getElementById('cfg18_logo_file').click()" style="background:#4a90e2;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px;">📷 Alterar Logo</button>
+                        <div style="font-size:10px;color:#999;margin-top:4px;">A imagem será salva no sistema.</div>
+                        <input id="cfg18_logo" type="hidden">
+                    </div>
+                    <div style="text-align:right;">
+                        <button onclick="syscontrole.salvarCfgNR18()" style="background:#27ae60;color:#fff;border:none;padding:10px 25px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;box-shadow:0 2px 4px rgba(39,174,96,0.3);">Salvar Tudo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Certificado NR-18 -->
+    <div id="modalCertNR18" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <button onclick="syscontrole.abrirCfgNR18()" class="btn-cfg-mobile-hide" style="background:#444; color:#fff; border:1px solid #666; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px; transition:0.2s;">⚙️ Configuração</button>
+            <span onclick="syscontrole.fecharCertNR18()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:800px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50;color:#fff;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
+                <strong>Certificado NR-18</strong>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <label style="font-size:12px;">N&ordm;:</label>
+                    <input id="cert18_num" type="text" oninput="syscontrole.renderCertNR18(); syscontrole.verificarESalvarNumeroControle('nr18', this.value, this, true)" onblur="syscontrole.verificarESalvarNumeroControle('nr18', this.value, this, false)" style="padding:4px 8px;border:1px solid #fff;border-radius:4px;width:80px;background:rgba(255,255,255,0.2);color:#fff;">
+                    <button onclick="syscontrole.abrirCfgNR18()" class="btn-cfg-mobile-hide" style="background:#f39c12;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Configuracao</button>
+                    <button onclick="document.getElementById('modalCertNR18').style.display='none'" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">&times;</button>
+                </div>
+            </div>
+            <div id="certNR18_preview" style="padding:30px;font-family:'Times New Roman',serif;overflow:auto;max-height:80vh;"></div>
+        </div>
+    </div>
+
+    <!-- Modal Lista de Presença NR-18 (LPT) -->
+    <div id="modalLPTNR18" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+
+            <span onclick="syscontrole.fecharLPTNR18()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:850px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; color:#fff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1a252f;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="background:#2980b9; color:#fff; padding:4px 8px; border-radius:4px; font-weight:bold; font-size:12px;">LPT</div>
+                    <strong style="font-size:16px;">Lista de Presença NR-18</strong>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="window.print()" style="background:#27ae60; color:#fff; border:none; padding:8px 18px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:13px; display:flex; align-items:center; gap:8px; transition:0.2s;" onmouseover="this.style.background='#219150'" onmouseout="this.style.background='#27ae60'">
+                        <span>🖨️</span> Imprimir Lista
+                    </button>
+                </div>
+            </div>
+            <div id="lptNR18_preview" style="background:#fff; min-height:600px; padding:0; overflow-y:auto; max-height:calc(95vh - 80px);">
+                <!-- Conteúdo da Lista será renderizado aqui -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Configuracao NR-20 -->
+    <div id="modalCfgNR20" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:100001;overflow:auto;">
+        <div style="background:#fff;margin:20px auto;max-width:650px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #34495e;">
+                <h3 style="margin:0; color:#ecf0f1; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight:600; font-size: 18px;">Configuração do Certificado NR-20</h3>
+                <span onclick="document.getElementById('modalCfgNR20').style.display='none'" style="color:#bdc3c7; font-size:28px; cursor:pointer; transition:0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#bdc3c7'">&times;</span>
+            </div>
+            <div style="padding:15px; display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <!-- Linha 1 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Instrutor</label>
+                    <input id="cfg20_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Instrutor</label>
+                    <input id="cfg20_cargo_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 2 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. MTE Instrutor</label>
+                    <input id="cfg20_reg_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Responsavel Tecnico</label>
+                    <input id="cfg20_responsavel" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 3 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Responsavel</label>
+                    <input id="cfg20_cargo_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. CREA</label>
+                    <input id="cfg20_reg_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 4 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Local</label>
+                    <input id="cfg20_local" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">UF</label>
+                    <input id="cfg20_uf" type="text" value="SP" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Ano Management -->
+                <div style="grid-column: span 2; background:#f0f7ff; border:1px solid #cce5ff; border-radius:8px; padding:12px; margin-top:5px;">
+                    <label style="font-size:12px; font-weight:700; color:#004085; display:block; margin-bottom:8px; border-bottom:1px solid #b8daff; padding-bottom:5px;">📅 Gerenciar Anos do Certificado</label>
+                    <div style="display:flex; gap:15px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Ano Ativo:</label>
+                            <div style="display:flex; gap:5px;">
+                                <select id="cfg20_ano_ativo" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; background:#fff; height:32px;">
+                                    <!-- Dinâmico -->
+                                </select>
+                                <button type="button" onclick="syscontrole.removerAnoSelecionado20()" style="background:#d9534f; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-size:20px; font-weight:bold; height:32px;" title="Excluir Ano selecionado">-</button>
+                            </div>
+                        </div>
+                        <div style="flex:1; border-left:1px solid #b8daff; padding-left:15px;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Novo Ano:</label>
+                            <div style="display:flex; gap:5px;">
+                                <input id="cfg20_novo_ano" type="number" placeholder="Ex: 2026" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; height:32px;">
+                                <button type="button" onclick="syscontrole.adicionarAno20()" style="background:#007bff; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-weight:bold; height:32px;">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Nível e Classe (Full width) -->
+                <div style="grid-column: span 2; padding:12px; background:#f8f9fa; border-radius:8px; border:1px solid #e9ecef; margin-top:5px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid #ddd; padding-bottom:8px;">
+                        <div>
+                            <span style="font-size:11px; font-weight:bold; color:#1a3a6b; display:block; margin-bottom:5px;">Nível do Curso:</span>
+                            <div style="display:flex; gap:10px;">
+                                <label style="font-size:12px; cursor:pointer;"><input type="radio" name="cfg20_nivel" value="iniciacao" id="cfg20_radio_iniciacao"> Iniciação (4h)</label>
+                                <label style="font-size:12px; cursor:pointer;"><input type="radio" name="cfg20_nivel" value="basico" id="cfg20_radio_basico" checked> Básico (4h a 8h)</label>
+                                <label style="font-size:12px; cursor:pointer;"><input type="radio" name="cfg20_nivel" value="intermediario" id="cfg20_radio_intermediario"> Intermediário (12h a 16h) ⚠️</label>
+                                <label style="font-size:12px; cursor:pointer;"><input type="radio" name="cfg20_nivel" value="avancado" id="cfg20_radio_avancado"> Avançado (20h a 32h) ⚠️</label>
+                            </div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:4px 10px;">
+                            <span style="font-size:11px;font-weight:bold;color:#856404;">📅 Data Fim:</span>
+                            <input type="text" id="cfg20_data_fim" placeholder="dd/mm/aaaa" maxlength="10" 
+                                oninput="syscontrole.formatarDataEmissao(event)"
+                                style="width:100px;padding:4px 6px;border:1px solid #ffc107;border-radius:4px;font-size:12px;text-align:center;"
+                                title="⚠️ OBRIGATÓRIO para Intermediário e Avançado. Sem Data Fim, o certificado ficará marcado como INVÁLIDO.">
+                        </div>
+                    </div>
+                    <div>
+                        <span style="font-size:11px; font-weight:bold; color:#1a3a6b; display:block; margin-bottom:5px;">Classe da Instalação:</span>
+                        <div style="display:flex; gap:15px;">
+                            <label style="font-size:12px; cursor:pointer;"><input type="radio" name="cfg20_classe" value="I" id="cfg20_radio_classe1" checked> Classe I</label>
+                            <label style="font-size:12px; cursor:pointer;"><input type="radio" name="cfg20_classe" value="II" id="cfg20_radio_classe2"> Classe II</label>
+                            <label style="font-size:12px; cursor:pointer;"><input type="radio" name="cfg20_classe" value="III" id="cfg20_radio_classe3"> Classe III</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logo Section -->
+                <div style="grid-column: span 2; display:flex; gap:15px; align-items:center; padding:10px; background:#fcfcfc; border-radius:8px; border:1px solid #eee; margin-top:5px;">
+                    <div id="cfg20_logo_preview_container" style="width:70px;height:70px;border:1px solid #dee2e6;border-radius:4px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+                        <img id="cfg20_logo_preview" src="/Logo-Hoss.jpg" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;">
+                    </div>
+                    <div style="flex:1;">
+                        <input type="file" id="cfg20_logo_file" accept="image/*" style="display:none;" onchange="syscontrole.processarLogoUploadNR20(this)">
+                        <button type="button" onclick="document.getElementById('cfg20_logo_file').click()" style="background:#4a90e2;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px;">📷 Alterar Logo</button>
+                        <div style="font-size:10px;color:#999;margin-top:4px;">A imagem será salva no sistema.</div>
+                        <input id="cfg20_logo" type="hidden">
+                    </div>
+                    <div style="text-align:right;">
+                        <button onclick="syscontrole.salvarCfgNR20()" style="background:#27ae60;color:#fff;border:none;padding:10px 25px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;box-shadow:0 2px 4px rgba(39,174,96,0.3);">Salvar Tudo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Certificado NR-20 -->
+    <div id="modalCertNR20" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <button onclick="syscontrole.abrirCfgNR20()" class="btn-cfg-mobile-hide" style="background:#444; color:#fff; border:1px solid #666; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px; transition:0.2s;">⚙️ Configuração</button>
+            <span onclick="syscontrole.fecharCertNR20()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:800px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50;color:#fff;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
+                <strong>Certificado NR-20</strong>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <label style="font-size:12px;">N&ordm;:</label>
+                    <input id="cert20_num" type="text" oninput="syscontrole.renderCertNR20(); syscontrole.verificarESalvarNumeroControle('nr20', this.value, this, true)" onblur="syscontrole.verificarESalvarNumeroControle('nr20', this.value, this, false)" style="padding:4px 8px;border:1px solid #fff;border-radius:4px;width:80px;background:rgba(255,255,255,0.2);color:#fff;">
+                    <button onclick="syscontrole.abrirCfgNR20()" class="btn-cfg-mobile-hide" style="background:#f39c12;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Configuracao</button>
+                    <button onclick="document.getElementById('modalCertNR20').style.display='none'" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">&times;</button>
+                </div>
+            </div>
+            <div id="certNR20_preview" style="padding:30px;font-family:'Times New Roman',serif;overflow:auto;max-height:80vh;"></div>
+        </div>
+    </div>
+
+    <!-- Modal Lista de Presença NR-20 (LPT) -->
+    <div id="modalLPTNR20" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+
+            <span onclick="syscontrole.fecharLPTNR20()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:850px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; color:#fff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1a252f;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="background:#2980b9; color:#fff; padding:4px 8px; border-radius:4px; font-weight:bold; font-size:12px;">LPT</div>
+                    <strong style="font-size:16px;">Lista de Presença NR-20</strong>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="window.print()" style="background:#27ae60; color:#fff; border:none; padding:8px 18px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:13px; display:flex; align-items:center; gap:8px; transition:0.2s;" onmouseover="this.style.background='#219150'" onmouseout="this.style.background='#27ae60'">
+                        <span>🖨️</span> Imprimir Lista
+                    </button>
+                </div>
+            </div>
+            <div id="lptNR20_preview" style="background:#fff; min-height:600px; padding:0; overflow-y:auto; max-height:calc(95vh - 80px);">
+                <!-- Conteúdo da Lista será renderizado aqui -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Configuracao NR-11 -->
+    <div id="modalCfgNR11" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:100001;overflow:auto;">
+        <div style="background:#fff;margin:10px auto;max-width:650px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; padding:10px 15px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #34495e;">
+                <h3 style="margin:0; color:#ecf0f1; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight:600; font-size: 16px;">Configuração do Certificado NR-11</h3>
+                <span onclick="document.getElementById('modalCfgNR11').style.display='none'" style="color:#bdc3c7; font-size:24px; cursor:pointer; transition:0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#bdc3c7'">&times;</span>
+            </div>
+            <div style="padding:10px; display:grid; grid-template-columns:1fr 1fr; gap:6px 10px;">
+                <!-- Linha 1 -->
+                <div>
+                    <label style="font-size:10px;font-weight:bold;display:block;margin-bottom:1px;color:#555;">Instrutor</label>
+                    <input id="cfg11_instrutor" type="text" style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:12px;height:28px;">
+                </div>
+                <div>
+                    <label style="font-size:10px;font-weight:bold;display:block;margin-bottom:1px;color:#555;">Cargo Instrutor</label>
+                    <input id="cfg11_cargo_instrutor" type="text" style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:12px;height:28px;">
+                </div>
+
+                <!-- Linha 2 -->
+                <div>
+                    <label style="font-size:10px;font-weight:bold;display:block;margin-bottom:1px;color:#555;">Reg. MTE</label>
+                    <input id="cfg11_reg_instrutor" type="text" style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:12px;height:28px;">
+                </div>
+                <div>
+                    <label style="font-size:10px;font-weight:bold;display:block;margin-bottom:1px;color:#555;">Responsavel Tecnico</label>
+                    <input id="cfg11_responsavel" type="text" style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:12px;height:28px;">
+                </div>
+
+                <!-- Linha 3 -->
+                <div>
+                    <label style="font-size:10px;font-weight:bold;display:block;margin-bottom:1px;color:#555;">Cargo Responsavel</label>
+                    <input id="cfg11_cargo_resp" type="text" style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:12px;height:28px;">
+                </div>
+                <div>
+                    <label style="font-size:10px;font-weight:bold;display:block;margin-bottom:1px;color:#555;">Reg. CREA</label>
+                    <input id="cfg11_reg_resp" type="text" style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:12px;height:28px;">
+                </div>
+
+                <!-- Linha 4 -->
+                <div>
+                    <label style="font-size:10px;font-weight:bold;display:block;margin-bottom:1px;color:#555;">Local</label>
+                    <input id="cfg11_local" type="text" style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:12px;height:28px;">
+                </div>
+                <div>
+                    <label style="font-size:10px;font-weight:bold;display:block;margin-bottom:1px;color:#555;">UF</label>
+                    <input id="cfg11_uf" type="text" value="SP" style="width:100%;padding:4px 6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:12px;height:28px;">
+                </div>
+
+                <!-- Linha 5 (Nome do Treinamento) -->
+                <div style="grid-column: span 2;">
+                    <label style="font-size:10px;font-weight:bold;display:block;margin-bottom:1px;color:#1a3a6b;">Nome Específico do Treinamento (Ex: Operação de Empilhadeira, Içamento de Cargas...)</label>
+                    <input id="cfg11_nome_treinamento" type="text" placeholder="Se deixado em branco, usará o texto padrão..." style="width:100%;padding:4px 8px;border:1px solid #7f9db9;border-radius:4px;box-sizing:border-box;font-size:12px;background:#fff; font-weight: 500; height:30px;">
+                </div>
+
+                <!-- Ano Management -->
+                <div style="grid-column: span 2; background:#f0f7ff; border:1px solid #cce5ff; border-radius:6px; padding:8px; margin-top:2px;">
+                    <label style="font-size:11px; font-weight:700; color:#004085; display:block; margin-bottom:6px; border-bottom:1px solid #b8daff; padding-bottom:3px;">📅 Gerenciar Anos do Certificado</label>
+                    <div style="display:flex; gap:10px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label style="font-size:9px; font-weight:bold; color:#555; text-transform:uppercase;">Ano Ativo:</label>
+                            <div style="display:flex; gap:4px;">
+                                <select id="cfg11_ano_ativo" style="flex:1; padding:3px; border:1px solid #7f9db9; border-radius:4px; font-size:12px; background:#fff; height:28px;">
+                                    <!-- Dinâmico -->
+                                </select>
+                                <button type="button" onclick="syscontrole.removerAnoSelecionado11()" style="background:#d9534f; color:#fff; border:none; padding:0 8px; border-radius:4px; cursor:pointer; font-size:16px; font-weight:bold; height:28px;" title="Excluir Ano selecionado">-</button>
+                            </div>
+                        </div>
+                        <div style="flex:1; border-left:1px solid #b8daff; padding-left:10px;">
+                            <label style="font-size:9px; font-weight:bold; color:#555; text-transform:uppercase;">Novo Ano:</label>
+                            <div style="display:flex; gap:4px;">
+                                <input id="cfg11_novo_ano" type="number" placeholder="Ex: 2026" style="flex:1; padding:3px; border:1px solid #7f9db9; border-radius:4px; font-size:12px; height:28px;">
+                                <button type="button" onclick="syscontrole.adicionarAno11()" style="background:#007bff; color:#fff; border:none; padding:0 8px; border-radius:4px; cursor:pointer; font-weight:bold; height:28px;">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Text Models & Active Model -->
+                <div style="grid-column: span 2; padding:8px; background:#f8f9fa; border-radius:6px; border:1px solid #e9ecef; margin-top:2px;">
+                    <div style="display:flex; gap:10px; align-items:center; border-bottom:1px solid #ddd; padding-bottom:6px; margin-bottom:6px;">
+                        <span style="font-size:10px; font-weight:bold; color:#555;">Modelo Ativo:</span>
+                        <label style="font-size:11px; cursor:pointer;"><input type="radio" name="cfg11_modelo_tipo" value="1" id="cfg11_radio_op"> Operador <span style="color:#666;font-size:9px;">(32h)</span></label>
+                        <label style="font-size:11px; cursor:pointer;"><input type="radio" name="cfg11_modelo_tipo" value="2" id="cfg11_radio_geral" checked> Básico <span style="color:#666;font-size:9px;">(8h)</span></label>
+                        <label style="font-size:11px; cursor:pointer;"><input type="radio" name="cfg11_modelo_tipo" value="3" id="cfg11_radio_recicle"> Reciclagem <span style="color:#666;font-size:9px;">(4h)</span></label>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <div style="display:flex;align-items:center;gap:6px;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:3px 8px;">
+                            <span style="font-size:10px;font-weight:bold;color:#856404;">📅 Data Fim:</span>
+                            <input type="text" id="cfg11_data_fim" placeholder="dd/mm/aaaa" maxlength="10"
+                                oninput="syscontrole.formatarDataEmissao(event)"
+                                style="width:90px;padding:2px 4px;border:1px solid #ffc107;border-radius:4px;font-size:11px;text-align:center;height:24px;"
+                                title="Preencha quando o treinamento durar mais de 1 dia">
+                        </div>
+                        <div style="margin-left:auto; display:none;">
+                            <textarea id="cfg11_txt_operador" style="display:none;"></textarea>
+                            <textarea id="cfg11_txt_geral" style="display:none;"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logo Section -->
+                <div style="grid-column: span 2; display:flex; gap:12px; align-items:center; padding:6px; background:#fcfcfc; border-radius:6px; border:1px solid #eee; margin-top:2px;">
+                    <div id="cfg11_logo_preview_container" style="width:45px;height:45px;border:1px solid #dee2e6;border-radius:4px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+                        <img id="cfg11_logo_preview" src="/Logo-Hoss.jpg" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;">
+                    </div>
+                    <div style="flex:1;">
+                        <input type="file" id="cfg11_logo_file" accept="image/*" style="display:none;" onchange="syscontrole.processarLogoUpload11(this)">
+                        <button type="button" onclick="document.getElementById('cfg11_logo_file').click()" style="background:#4a90e2;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:600;font-size:11px;">📷 Alterar Logo</button>
+                        <input id="cfg11_logo" type="hidden">
+                    </div>
+                    <div style="text-align:right;">
+                        <button onclick="syscontrole.salvarCfgNR11()" style="background:#27ae60;color:#fff;border:none;padding:8px 20px;border-radius:5px;cursor:pointer;font-weight:bold;font-size:13px;box-shadow:0 2px 4px rgba(39,174,96,0.3);">Salvar Tudo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Certificado NR-11 -->
+    <div id="modalCertNR11" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <button onclick="syscontrole.abrirCfgNR11()" class="btn-cfg-mobile-hide" style="background:#444; color:#fff; border:1px solid #666; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px; transition:0.2s;">⚙️ Configuração</button>
+            <span onclick="syscontrole.fecharCertNR11()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:800px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50;color:#fff;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
+                <strong>Certificado NR-11</strong>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <label style="font-size:12px;">N&ordm;:</label>
+                    <input id="cert11_num" type="text" oninput="syscontrole.renderCertNR11(); syscontrole.verificarESalvarNumeroControle('nr11', this.value, this, true)" onblur="syscontrole.verificarESalvarNumeroControle('nr11', this.value, this, false)" style="padding:4px 8px;border:1px solid #fff;border-radius:4px;width:80px;background:rgba(255,255,255,0.2);color:#fff;">
+                    <button onclick="syscontrole.abrirCfgNR11()" class="btn-cfg-mobile-hide" style="background:#f39c12;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Configuracao</button>
+                    <button onclick="document.getElementById('modalCertNR11').style.display='none'" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">&times;</button>
+                </div>
+            </div>
+            <div id="certNR11_preview" style="padding:30px;font-family:'Times New Roman',serif;overflow:auto;max-height:80vh;"></div>
+        </div>
+    </div>
+
+    <!-- Modal LPT NR-11 -->
+    <div id="modalLPTNR11" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <span onclick="syscontrole.fecharLPTNR11()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:850px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; color:#fff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1a252f;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="background:#2980b9; color:#fff; padding:4px 8px; border-radius:4px; font-weight:bold; font-size:12px;">LPT</div>
+                    <strong style="font-size:16px;">Lista de Presença NR-11</strong>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="window.print()" style="background:#27ae60; color:#fff; border:none; padding:8px 18px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:13px; display:flex; align-items:center; gap:8px; transition:0.2s;" onmouseover="this.style.background='#219150'" onmouseout="this.style.background='#27ae60'">
+                        <span>🖨️</span> Imprimir Lista
+                    </button>
+                </div>
+            </div>
+            <div id="lptNR11_preview" style="background:#fff; min-height:600px; padding:0; overflow-y:auto; max-height:calc(95vh - 80px);">
+                <!-- Conteúdo da Lista será renderizado aqui -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Configuracao NR-33 -->
+    <div id="modalCfgNR33" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:100001;overflow:auto;">
+        <div style="background:#fff;margin:15px auto;max-width:700px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #34495e;">
+                <h3 style="margin:0; color:#ecf0f1; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight:600; font-size: 18px;">Configuração do Certificado NR-33</h3>
+                <span onclick="document.getElementById('modalCfgNR33').style.display='none'" style="color:#bdc3c7; font-size:28px; cursor:pointer; transition:0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#bdc3c7'">&times;</span>
+            </div>
+            <div style="padding:15px; display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <!-- Linha 1 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Instrutor</label>
+                    <input id="cfg33_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo Instrutor</label>
+                    <input id="cfg33_cargo_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 2 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. MTE</label>
+                    <input id="cfg33_reg_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Responsavel Tecnico</label>
+                    <input id="cfg33_responsavel" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 3 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo Responsavel</label>
+                    <input id="cfg33_cargo_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. CREA</label>
+                    <input id="cfg33_reg_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 4 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Local</label>
+                    <input id="cfg33_local" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">UF</label>
+                    <input id="cfg33_uf" type="text" value="SP" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Ano Management -->
+                <div style="grid-column: span 2; background:#f0f7ff; border:1px solid #cce5ff; border-radius:8px; padding:12px; margin-top:5px;">
+                    <label style="font-size:12px; font-weight:700; color:#004085; display:block; margin-bottom:8px; border-bottom:1px solid #b8daff; padding-bottom:5px;">📅 Gerenciar Anos do Certificado</label>
+                    <div style="display:flex; gap:15px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Ano Ativo:</label>
+                            <div style="display:flex; gap:5px;">
+                                <select id="cfg33_ano_ativo" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; background:#fff; height:32px;">
+                                    <!-- Dinâmico -->
+                                </select>
+                                <button type="button" onclick="syscontrole.removerAnoSelecionado33()" style="background:#d9534f; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-size:20px; font-weight:bold; height:32px;" title="Excluir Ano selecionado">-</button>
+                            </div>
+                        </div>
+                        <div style="flex:1; border-left:1px solid #b8daff; padding-left:15px;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Novo Ano:</label>
+                            <div style="display:flex; gap:5px;">
+                                <input id="cfg33_novo_ano" type="number" placeholder="Ex: 2026" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; height:32px;">
+                                <button type="button" onclick="syscontrole.adicionarAno33()" style="background:#007bff; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-weight:bold; height:32px;">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Text Models (Supervisor / Executante) -->
+                <div style="grid-column: span 2; padding:12px; background:#f8f9fa; border-radius:8px; border:1px solid #e9ecef; margin-top:5px;">
+                    <div style="display:none; gap:10px; align-items:center; margin-bottom:8px;">
+                        <div style="flex:1;">
+                            <label style="font-size:11px;font-weight:bold;color:#1a3a6b;">Texto: Supervisor</label>
+                            <textarea id="cfg33_txt_supervisor" style="width:100%;height:45px;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;resize:none;"></textarea>
+                        </div>
+                        <div style="flex:1;">
+                            <label style="font-size:11px;font-weight:bold;color:#1a3a6b;">Texto: Executante</label>
+                            <textarea id="cfg33_txt_executante" style="width:100%;height:45px;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;resize:none;"></textarea>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:15px; align-items:center; border-top:1px solid #ddd; padding-top:8px;">
+                        <span style="font-size:11px; font-weight:bold; color:#555;">Modelo Ativo:</span>
+                        <label style="font-size:12px; cursor:pointer;"><input type="radio" name="cfg33_modelo_tipo" value="1" id="cfg33_radio_sup"> Supervisor</label>
+                        <label style="font-size:12px; cursor:pointer;"><input type="radio" name="cfg33_modelo_tipo" value="2" id="cfg33_radio_exec" checked> Executante/Vigia <span style="color:#666;font-size:10px;">(16h)</span></label>
+                        <label style="font-size:12px; cursor:pointer;"><input type="radio" name="cfg33_modelo_tipo" value="3" id="cfg33_radio_recicle"> Reciclagem <span style="color:#666;font-size:10px;">(8h)</span></label>
+                        <div style="display:flex;align-items:center;gap:6px;margin-left:auto;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:4px 10px;">
+                            <span style="font-size:11px;font-weight:bold;color:#856404;">📅 Data Fim:</span>
+                            <input type="text" id="cfg33_data_fim" placeholder="dd/mm/aaaa" maxlength="10"
+                                oninput="syscontrole.formatarDataEmissao(event)"
+                                style="width:110px;padding:4px 6px;border:1px solid #ffc107;border-radius:4px;font-size:12px;text-align:center;"
+                                title="Preencha quando o treinamento durar mais de 1 dia">
+                        </div>
+                    </div>
+                </div>>
+
+                <!-- Logo Section -->
+                <div style="grid-column: span 2; display:flex; gap:15px; align-items:center; padding:10px; background:#fcfcfc; border-radius:8px; border:1px solid #eee; margin-top:5px;">
+                    <div id="cfg33_logo_preview_container" style="width:70px;height:70px;border:1px solid #dee2e6;border-radius:4px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+                        <img id="cfg33_logo_preview" src="/Logo-Hoss.jpg" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;">
+                    </div>
+                    <div style="flex:1;">
+                        <input type="file" id="cfg33_logo_file" accept="image/*" style="display:none;" onchange="syscontrole.processarLogoUpload33(this)">
+                        <button type="button" onclick="document.getElementById('cfg33_logo_file').click()" style="background:#4a90e2;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px;">📷 Alterar Logo</button>
+                        <div style="font-size:10px;color:#999;margin-top:4px;">A imagem será salva no sistema.</div>
+                        <input id="cfg33_logo" type="hidden">
+                    </div>
+                    <div style="text-align:right;">
+                        <button onclick="syscontrole.salvarCfgNR33()" style="background:#27ae60;color:#fff;border:none;padding:10px 25px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;box-shadow:0 2px 4px rgba(39,174,96,0.3);">Salvar Tudo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Certificado NR-33 -->
+    <div id="modalCertNR33" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <button onclick="syscontrole.abrirCfgNR33()" class="btn-cfg-mobile-hide" style="background:#444; color:#fff; border:1px solid #666; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px; transition:0.2s;">⚙️ Configuração</button>
+            <span onclick="syscontrole.fecharCertNR33()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:800px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50;color:#fff;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
+                <strong>Certificado NR-33</strong>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <label style="font-size:12px;">N&ordm;:</label>
+                    <input id="cert33_num" type="text" oninput="syscontrole.renderCertNR33(); syscontrole.verificarESalvarNumeroControle('nr33', this.value, this, true)" onblur="syscontrole.verificarESalvarNumeroControle('nr33', this.value, this, false)" style="padding:4px 8px;border:1px solid #fff;border-radius:4px;width:80px;background:rgba(255,255,255,0.2);color:#fff;">
+                    <button onclick="syscontrole.abrirCfgNR33()" class="btn-cfg-mobile-hide" style="background:#f39c12;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Configuracao</button>
+                    <button onclick="document.getElementById('modalCertNR33').style.display='none'" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">&times;</button>
+                </div>
+            </div>
+            <div id="certNR33_preview" style="padding:30px;font-family:'Times New Roman',serif;overflow:auto;max-height:80vh;"></div>
+        </div>
+    </div>
+
+    <!-- Modal Lista de Presença NR-33 (LPT) -->
+    <div id="modalLPTNR33" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+
+            <span onclick="syscontrole.fecharLPTNR33()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:850px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; color:#fff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1a252f;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="background:#2980b9; color:#fff; padding:4px 8px; border-radius:4px; font-weight:bold; font-size:12px;">LPT</div>
+                    <strong style="font-size:16px;">Lista de Presença NR-33</strong>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="window.print()" style="background:#27ae60; color:#fff; border:none; padding:8px 18px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:13px; display:flex; align-items:center; gap:8px; transition:0.2s;" onmouseover="this.style.background='#219150'" onmouseout="this.style.background='#27ae60'">
+                        <span>🖨️</span> Imprimir Lista
+                    </button>
+                </div>
+            </div>
+            <div id="lptNR33_preview" style="background:#fff; min-height:600px; padding:0; overflow-y:auto; max-height:calc(95vh - 80px);">
+                <!-- Conteúdo da Lista será renderizado aqui -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Configuracao NR-35 -->
+    <div id="modalCfgNR35" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:100001;overflow:auto;">
+        <div style="background:#fff;margin:20px auto;max-width:650px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #34495e;">
+                <h3 style="margin:0; color:#ecf0f1; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight:600; font-size: 18px;">Configuração do Certificado NR-35</h3>
+                <span onclick="syscontrole.fecharCfgNR35()" style="color:#bdc3c7; font-size:28px; cursor:pointer; transition:0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#bdc3c7'">&times;</span>
+            </div>
+            <div style="padding:15px; display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <!-- Linha 1 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Instrutor</label>
+                    <input id="cfg35_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Instrutor</label>
+                    <input id="cfg35_cargo_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 2 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. MTE Instrutor</label>
+                    <input id="cfg35_reg_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Responsavel Tecnico</label>
+                    <input id="cfg35_responsavel" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 3 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Responsavel</label>
+                    <input id="cfg35_cargo_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. CREA</label>
+                    <input id="cfg35_reg_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 4 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Local</label>
+                    <input id="cfg35_local" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">UF</label>
+                    <input id="cfg35_uf" type="text" value="SP" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+
+                <!-- Ano Management -->
+                <div style="grid-column: span 2; background:#f0f7ff; border:1px solid #cce5ff; border-radius:8px; padding:12px; margin-top:5px;">
+                    <label style="font-size:12px; font-weight:700; color:#004085; display:block; margin-bottom:8px; border-bottom:1px solid #b8daff; padding-bottom:5px;">📅 Gerenciar Anos do Certificado</label>
+                    <div style="display:flex; gap:15px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Ano Ativo:</label>
+                            <div style="display:flex; gap:5px;">
+                                <select id="cfg35_ano_ativo" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; background:#fff; height:32px;">
+                                    <!-- Dinâmico -->
+                                </select>
+                                <button type="button" onclick="syscontrole.removerAnoSelecionado35()" style="background:#d9534f; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-size:20px; font-weight:bold; height:32px;" title="Excluir Ano selecionado">-</button>
+                            </div>
+                        </div>
+                        <div style="flex:1; border-left:1px solid #b8daff; padding-left:15px;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Novo Ano:</label>
+                            <div style="display:flex; gap:5px;">
+                                <input id="cfg35_novo_ano" type="number" placeholder="Ex: 2026" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; height:32px;">
+                                <button type="button" onclick="syscontrole.adicionarAno35()" style="background:#007bff; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-weight:bold; height:32px;">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logo Section -->
+                <div style="grid-column: span 2; display:flex; gap:15px; align-items:center; padding:10px; background:#fcfcfc; border-radius:8px; border:1px solid #eee; margin-top:5px;">
+                    <div id="cfg35_logo_preview_container" style="width:70px;height:70px;border:1px solid #dee2e6;border-radius:4px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+                        <img id="cfg35_logo_preview" src="/Logo-Hoss.jpg" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;">
+                    </div>
+                    <div style="flex:1;">
+                        <input type="file" id="cfg35_logo_file" accept="image/*" style="display:none;" onchange="syscontrole.processarLogoUploadNR35(this)">
+                        <button type="button" onclick="document.getElementById('cfg35_logo_file').click()" style="background:#4a90e2;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px;">📷 Alterar Logo</button>
+                        <div style="font-size:10px;color:#999;margin-top:4px;">A imagem será salva no sistema.</div>
+                        <input id="cfg35_logo" type="hidden">
+                    </div>
+                    <div style="text-align:right;">
+                        <button onclick="syscontrole.salvarCfgNR35()" style="background:#27ae60;color:#fff;border:none;padding:10px 25px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;box-shadow:0 2px 4px rgba(39,174,96,0.3);">Salvar Tudo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Certificado NR-35 -->
+    <div id="modalCertNR35" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <button onclick="syscontrole.abrirCfgNR35()" class="btn-cfg-mobile-hide" style="background:#444; color:#fff; border:1px solid #666; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px; transition:0.2s;">⚙️ Configuração</button>
+            <span onclick="syscontrole.fecharCertNR35()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:800px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50;color:#fff;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
+                <strong>Certificado NR-35</strong>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <label style="font-size:12px;">N&ordm;:</label>
+                    <input id="cert35_num" type="text" oninput="syscontrole.renderCertNR35(); syscontrole.verificarESalvarNumeroControle('nr35', this.value, this, true)" onblur="syscontrole.verificarESalvarNumeroControle('nr35', this.value, this, false)" style="padding:4px 8px;border:1px solid #fff;border-radius:4px;width:80px;background:rgba(255,255,255,0.2);color:#fff;">
+                    <button type="button" onclick="syscontrole.abrirCfgNR35()" class="btn-cfg-mobile-hide" style="background:#f39c12;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Configuração</button>
+                    <button type="button" onclick="syscontrole.fecharCertNR35()" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">&times;</button>
+                </div>
+            </div>
+            <div id="certNR35_preview" style="padding:30px;font-family:'Times New Roman',serif;overflow:auto;max-height:80vh;"></div>
+        </div>
+    </div>
+
+    <!-- Modal Lista de Presença NR-35 (LPT) -->
+    <div id="modalLPTNR35" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+
+            <span onclick="syscontrole.fecharLPTNR35()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:850px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; color:#fff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1a252f;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="background:#2980b9; color:#fff; padding:4px 8px; border-radius:4px; font-weight:bold; font-size:12px;">LPT</div>
+                    <strong style="font-size:16px;">Lista de Presença NR-35</strong>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="window.print()" style="background:#27ae60; color:#fff; border:none; padding:8px 18px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:13px; display:flex; align-items:center; gap:8px; transition:0.2s;" onmouseover="this.style.background='#219150'" onmouseout="this.style.background='#27ae60'">
+                        <span>🖨️</span> Imprimir Lista
+                    </button>
+                </div>
+            </div>
+            <div id="lptNR35_preview" style="background:#fff; min-height:600px; padding:0; overflow-y:auto; max-height:calc(95vh - 80px);">
+                <!-- Conteúdo da Lista será renderizado aqui -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Configuracao NR-17 -->
+    <div id="modalCfgNR17" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:100001;overflow:auto;">
+        <div style="background:#fff;margin:20px auto;max-width:650px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #34495e;">
+                <h3 style="margin:0; color:#ecf0f1; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight:600; font-size: 18px;">Configuração do Certificado NR-17</h3>
+                <span onclick="document.getElementById('modalCfgNR17').style.display='none'" style="color:#bdc3c7; font-size:28px; cursor:pointer; transition:0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#bdc3c7'">&times;</span>
+            </div>
+            <div style="padding:15px; display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <!-- Linha 1 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Instrutor</label>
+                    <input id="cfg17_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Instrutor</label>
+                    <input id="cfg17_cargo_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 2 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. MTE Instrutor</label>
+                    <input id="cfg17_reg_instrutor" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Responsavel Tecnico</label>
+                    <input id="cfg17_responsavel" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 3 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Cargo do Responsavel</label>
+                    <input id="cfg17_cargo_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Reg. CREA</label>
+                    <input id="cfg17_reg_resp" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+                <!-- Linha 4 -->
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">Local</label>
+                    <input id="cfg17_local" type="text" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:bold;display:block;margin-bottom:2px;color:#555;">UF</label>
+                    <input id="cfg17_uf" type="text" value="SP" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;">
+                </div>
+
+
+                <!-- Ano Management -->
+                <div style="grid-column: span 2; background:#f0f7ff; border:1px solid #cce5ff; border-radius:8px; padding:12px; margin-top:5px;">
+                    <label style="font-size:12px; font-weight:700; color:#004085; display:block; margin-bottom:8px; border-bottom:1px solid #b8daff; padding-bottom:5px;">📅 Gerenciar Anos do Certificado</label>
+                    <div style="display:flex; gap:15px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Ano Ativo:</label>
+                            <div style="display:flex; gap:5px;">
+                                <select id="cfg17_ano_ativo" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; background:#fff; height:32px;">
+                                    <!-- Dinâmico -->
+                                </select>
+                                <button type="button" onclick="syscontrole.removerAnoSelecionado17()" style="background:#d9534f; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-size:20px; font-weight:bold; height:32px;" title="Excluir Ano selecionado">-</button>
+                            </div>
+                        </div>
+                        <div style="flex:1; border-left:1px solid #b8daff; padding-left:15px;">
+                            <label style="font-size:10px; font-weight:bold; color:#555; text-transform:uppercase;">Novo Ano:</label>
+                            <div style="display:flex; gap:5px;">
+                                <input id="cfg17_novo_ano" type="number" placeholder="Ex: 2026" style="flex:1; padding:5px; border:1px solid #7f9db9; border-radius:4px; font-size:13px; height:32px;">
+                                <button type="button" onclick="syscontrole.adicionarAno17()" style="background:#007bff; color:#fff; border:none; padding:0 12px; border-radius:4px; cursor:pointer; font-weight:bold; height:32px;">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logo Section -->
+                <div style="grid-column: span 2; display:flex; gap:15px; align-items:center; padding:10px; background:#fcfcfc; border-radius:8px; border:1px solid #eee; margin-top:5px;">
+                    <div id="cfg17_logo_preview_container" style="width:70px;height:70px;border:1px solid #dee2e6;border-radius:4px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+                        <img id="cfg17_logo_preview" src="/Logo-Hoss.jpg" alt="Logo" style="max-width:100%;max-height:100%;object-fit:contain;">
+                    </div>
+                    <div style="flex:1;">
+                        <input type="file" id="cfg17_logo_file" accept="image/*" style="display:none;" onchange="syscontrole.processarLogoUploadNR17(this)">
+                        <button type="button" onclick="document.getElementById('cfg17_logo_file').click()" style="background:#4a90e2;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:600;font-size:12px;">📷 Alterar Logo</button>
+                        <div style="font-size:10px;color:#999;margin-top:4px;">A imagem será salva no sistema.</div>
+                        <input id="cfg17_logo" type="hidden">
+                    </div>
+                    <div style="text-align:right;">
+                        <button onclick="syscontrole.salvarCfgNR17()" style="background:#27ae60;color:#fff;border:none;padding:10px 25px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;box-shadow:0 2px 4px rgba(39,174,96,0.3);">Salvar Tudo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Certificado NR-17 -->
+    <div id="modalCertNR17" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <button onclick="syscontrole.abrirCfgNR17()" class="btn-cfg-mobile-hide" style="background:#444; color:#fff; border:1px solid #666; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px; transition:0.2s;">⚙️ Configuração</button>
+            <span onclick="syscontrole.fecharCertNR17()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:800px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50;color:#fff;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
+                <strong>Certificado NR-17</strong>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <label style="font-size:12px;">N&ordm;:</label>
+                    <input id="cert17_num" type="text" oninput="syscontrole.renderCertNR17(); syscontrole.verificarESalvarNumeroControle('nr17', this.value, this, true)" onblur="syscontrole.verificarESalvarNumeroControle('nr17', this.value, this, false)" style="padding:4px 8px;border:1px solid #fff;border-radius:4px;width:80px;background:rgba(255,255,255,0.2);color:#fff;">
+                    <button onclick="syscontrole.abrirCfgNR17()" class="btn-cfg-mobile-hide" style="background:#f39c12;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px;">Configuracao</button>
+                    <button onclick="document.getElementById('modalCertNR17').style.display='none'" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">&times;</button>
+                </div>
+            </div>
+            <div id="certNR17_preview" style="padding:30px;font-family:'Times New Roman',serif;overflow:auto;max-height:80vh;"></div>
+        </div>
+    </div>
+
+    <!-- Modal Lista de Presença NR-17 (LPT) -->
+    <div id="modalLPTNR17" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <span onclick="syscontrole.fecharLPTNR17()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:850px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; color:#fff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #1a252f;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="background:#2980b9; color:#fff; padding:4px 8px; border-radius:4px; font-weight:bold; font-size:12px;">LPT</div>
+                    <strong style="font-size:16px;">Lista de Presença NR-17</strong>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="window.print()" style="background:#27ae60; color:#fff; border:none; padding:8px 18px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:13px; display:flex; align-items:center; gap:8px; transition:0.2s;" onmouseover="this.style.background='#219150'" onmouseout="this.style.background='#27ae60'">
+                        <span>🖨️</span> Imprimir Lista
+                    </button>
+                </div>
+            </div>
+            <div id="lptNR17_preview" style="background:#fff; min-height:600px; padding:0; overflow-y:auto; max-height:calc(95vh - 80px);">
+                <!-- Conteúdo da Lista será renderizado aqui -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Ficha de EPI (Visualização/Impressão) -->
+    <div id="modalFichaEPI" class="modal" style="display:none; z-index: 100000; background: rgba(0,0,0,0.9); padding: 0;">
+        <div style="position:absolute; top:15px; right:20px; z-index:200000; display:flex; gap:15px; align-items:center;">
+            <button onclick="syscontrole.abrirCfgEPI()" class="btn-cfg-mobile-hide" style="background:#444; color:#fff; border:1px solid #666; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px; transition:0.2s;">⚙️ Configuração</button>
+            <span onclick="syscontrole.fecharFichaEPI()" style="color:#fff; font-size:40px; cursor:pointer; line-height:1; font-weight:lighter; opacity:0.8; transition:0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.8">&times;</span>
+        </div>
+        <div style="background:#fff;margin:15px auto;max-width:1100px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50;color:#fff;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
+                <strong>Ficha Individual de EPI</strong>
+                <div style="display:flex;gap:15px;align-items:center;">
+                    <div style="display:flex; gap:10px; background: rgba(255,255,255,0.1); padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2);">
+                        <label style="font-size:12px; color:#fff; cursor:pointer; display:flex; align-items:center; gap:5px;">
+                            <input type="radio" name="tipo_impressao_epi" value="padrao" checked onclick="syscontrole.renderFichaEPI()"> Padrão
+                        </label>
+                        <label style="font-size:12px; color:#fff; cursor:pointer; display:flex; align-items:center; gap:5px;">
+                            <input type="radio" name="tipo_impressao_epi" value="branco" onclick="syscontrole.solicitarLinhasBrancoEPI()"> Em Branco
+                        </label>
+                    </div>
+                    <button onclick="window.print()" style="background:#27ae60; color:#fff; border:none; padding:8px 18px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:13px; display:flex; align-items:center; gap:8px;">
+                        <span>🖨️</span> Imprimir Ficha
+                    </button>
+                    <button onclick="syscontrole.fecharFichaEPI()" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer;">&times;</button>
+                </div>
+            </div>
+            <div id="fichaEPI_preview" style="padding:20px;font-family:'Arial',sans-serif;overflow:auto;max-height:85vh;background:#fff;">
+                <!-- Conteúdo da Ficha será renderizado aqui -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Configuração da Ficha de EPI (Edição de Itens) -->
+    <div id="modalCfgEPI" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:100001;overflow:auto;">
+        <div style="background:#fff;margin:10px auto;max-width:800px;border-radius:8px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+            <div style="background:#2c3e50; padding:10px 15px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #34495e;">
+                <h3 style="margin:0; color:#ecf0f1; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight:600; font-size: 16px;">Itens da Ficha de EPI</h3>
+                <span onclick="document.getElementById('modalCfgEPI').style.display='none'" style="color:#bdc3c7; font-size:24px; cursor:pointer; transition:0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#bdc3c7'">&times;</span>
+            </div>
+            <div style="padding:15px;">
+                <div style="margin-bottom:15px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                    <span style="font-size:11px; color:#666; flex:1;">Preencha os itens para o funcionário ou defina o padrão da empresa.</span>
+                    <div style="display:flex; gap:8px;">
+                        <button type="button" onclick="syscontrole.carregarItensPadraoEPI()" style="background:#f39c12; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:11px;">📂 Carregar Padrão</button>
+                        <button type="button" onclick="syscontrole.salvarItensPadraoEPI()" style="background:#3498db; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:11px;">💾 Salvar como Padrão</button>
+                        <button type="button" onclick="syscontrole.adicionarLinhaEPI()" style="background:#007bff; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:11px;">+ Adicionar Item</button>
+                    </div>
+                </div>
+                <div style="max-height:400px; overflow-y:auto;">
+                    <table style="width:100%; border-collapse:collapse;" id="tabelaItensEPI">
+                        <thead>
+                            <tr style="background:#f8f9fa;">
+                                <th style="border:1px solid #ddd; padding:8px; text-align:center; width:60px;">Quant.</th>
+                                <th style="border:1px solid #ddd; padding:8px; text-align:left;">Discriminação</th>
+                                <th style="border:1px solid #ddd; padding:8px; text-align:center; width:100px;">C.A.</th>
+                                <th style="border:1px solid #ddd; padding:8px; text-align:center; width:120px;">Dt. Entrega</th>
+                                <th style="border:1px solid #ddd; padding:8px; text-align:center; width:40px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbodyItensEPI">
+                            <!-- Linhas dinâmicas -->
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top:20px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid #eee; padding-top:15px; gap:10px;">
+                    <div style="flex:2;">
+                        <label style="display:block; font-size:12px; color:#666; font-weight:bold; margin-bottom:5px;">Técnico de Segurança (Padrão):</label>
+                        <input type="text" id="configTecnicoEPI" placeholder="Nome do Técnico" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
+                    </div>
+                    <div style="flex:1;">
+                        <label style="display:block; font-size:12px; color:#666; font-weight:bold; margin-bottom:5px;">Setor:</label>
+                        <input type="text" id="configSetorEPI" placeholder="Ex: OPERACIONAL, ADM" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px; text-transform:uppercase;">
+                    </div>
+                    <button onclick="syscontrole.salvarItensEPI()" style="background:#27ae60;color:#fff;border:none;padding:10px 25px;border-radius:6px;cursor:pointer;font-weight:bold;font-size:14px;box-shadow:0 2px 4px rgba(39,174,96,0.3); align-self:flex-end;">Salvar Itens</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =====================================================================
+         MODAL FORMULÁRIOS (Ordem de Serviço / PT)
+    ====================================================================== -->
+    <div id="modalFormularios" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:9900; justify-content:center; align-items:flex-start; padding-top:10px;">
+        <div style="background:#fff; border-radius:10px; width:98vw; height:95vh; display:flex; flex-direction:column; box-shadow:0 8px 40px rgba(0,0,0,0.35); overflow:hidden;">
+
+            <!-- Cabeçalho do modal -->
+            <div style="background:linear-gradient(135deg,#1a3a5c,#2980b9); padding:14px 20px; display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="margin:0; color:#fff; font-family:'Segoe UI',sans-serif; font-size:16px; font-weight:600; display:flex; align-items:center; gap:8px;">📝 Formulários</h3>
+                <span onclick="document.getElementById('modalFormularios').style.display='none'" style="color:#ecf0f1; font-size:26px; cursor:pointer; line-height:1; transition:color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#ecf0f1'">&#10005;</span>
+            </div>
+
+            <!-- Abas -->
+            <div style="display:flex; background:#f0f4f8; border-bottom:2px solid #d0dce8; padding:0 20px; gap:4px; padding-top:8px;">
+                <button id="tabBtnOS" onclick="syscontrole.trocarAbaFormulario('os')" style="padding:8px 22px; border:none; border-radius:6px 6px 0 0; font-size:13px; font-weight:700; cursor:pointer; background:#1a3a5c; color:#fff; transition:all 0.2s;">📋 Ordem de Serviço</button>
+                <button id="tabBtnPT" onclick="syscontrole.trocarAbaFormulario('pt')" style="padding:8px 22px; border:none; border-radius:6px 6px 0 0; font-size:13px; font-weight:700; cursor:pointer; background:#e0e8f0; color:#1a3a5c; transition:all 0.2s;">🔒 PT – Permissão de Trabalho</button>
+            </div>
+
+            <!-- Conteúdo das abas -->
+            <div style="flex:1; overflow-y:auto; padding:24px 24px 16px;">
+
+                <!-- ABA: Ordem de Serviço -->
+                <div id="conteudoAbaOS" style="display:block;">
+                    <p style="color:#555; font-size:13px; text-align:center; margin-top:60px; font-style:italic;">🚧 Conteúdo da Ordem de Serviço será implementado em breve.</p>
+                </div>
+
+                <!-- ABA: PT – Permissão de Trabalho -->
+                <div id="conteudoAbaPT" style="display:none;">
+                    <p style="color:#555; font-size:13px; text-align:center; margin-top:60px; font-style:italic;">🚧 Conteúdo da Permissão de Trabalho será implementado em breve.</p>
+                </div>
+            </div>
+
+            <!-- Rodapé -->
+            <div style="padding:12px 24px; border-top:1px solid #e0e8f0; display:flex; justify-content:flex-end; background:#f8fafc;">
+                <button onclick="document.getElementById('modalFormularios').style.display='none'" style="background:#6c757d; color:#fff; border:none; padding:8px 22px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="formulario-os.js?v=1"></script>
+    <script src="formulario-pt.js?v=1"></script>
+    <script src="script.js?v=41"></script>
+    <script src="cert-nr06.js?v=40"></script>
+    <script src="cert-nr11.js?v=40"></script>
+    <script src="cert-nr12.js?v=40"></script>
+    <script src="cert-nr17.js?v=40"></script>
+    <script src="cert-nr18.js?v=40"></script>
+    <script src="cert-nr20.js?v=40"></script>
+    <script src="cert-nr33.js?v=40"></script>
+    <script src="cert-nr35.js?v=40"></script>
+    <script src="cert-epi.js?v=41"></script>
+    <script src="anti-flicker.js?v=40"></script>
 </body>
 </html>

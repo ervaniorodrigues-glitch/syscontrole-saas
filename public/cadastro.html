@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSMA - Cadastro Gratuito</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.3);
+            width: 440px;
+            max-width: 100%;
+            overflow: hidden;
+        }
+        .header {
+            background: #87CEEB;
+            color: #1a5276;
+            padding: 28px 30px;
+            text-align: center;
+        }
+        .header h1 { font-size: 42px; font-weight: bold; letter-spacing: 5px; }
+        .header p { margin-top: 4px; font-size: 13px; opacity: 0.8; }
+        .trial-badge {
+            background: #e8f5e9;
+            border: 1px solid #a5d6a7;
+            color: #2e7d32;
+            text-align: center;
+            padding: 12px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .form-body { padding: 28px 30px; }
+        .form-group { margin-bottom: 18px; }
+        .form-group label { display: block; margin-bottom: 6px; color: #333; font-weight: 500; font-size: 14px; }
+        .form-group input {
+            width: 100%;
+            padding: 11px 14px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 15px;
+            transition: border-color 0.3s;
+        }
+        .form-group input:focus { outline: none; border-color: #87CEEB; }
+        .btn-cadastrar {
+            width: 100%;
+            padding: 13px;
+            background: #2e7d32;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+            margin-top: 4px;
+        }
+        .btn-cadastrar:hover { background: #1b5e20; }
+        .btn-cadastrar:disabled { background: #ccc; cursor: not-allowed; }
+        .msg { padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 14px; text-align: center; display: none; }
+        .msg.erro { background: #ffebee; color: #c62828; }
+        .msg.sucesso { background: #e8f5e9; color: #2e7d32; }
+        .login-link { text-align: center; margin-top: 18px; font-size: 13px; color: #666; }
+        .login-link a { color: #1a5276; text-decoration: none; font-weight: 600; }
+        .login-link a:hover { text-decoration: underline; }
+        .requisitos { font-size: 12px; color: #888; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>SSMA</h1>
+            <p>Sistema de Segurança e Meio Ambiente</p>
+        </div>
+        <div class="trial-badge">
+            🎉 30 dias grátis — sem cartão de crédito
+        </div>
+        <div class="form-body">
+            <div id="msg" class="msg"></div>
+            <form id="formCadastro">
+                <div class="form-group">
+                    <label for="nome_empresa">Nome da Empresa</label>
+                    <input type="text" id="nome_empresa" placeholder="Ex: Hoss Segurança do Trabalho" required>
+                </div>
+                <div class="form-group">
+                    <label for="email">E-mail (será seu login)</label>
+                    <input type="email" id="email" placeholder="contato@suaempresa.com.br" required>
+                </div>
+                <div class="form-group">
+                    <label for="senha">Senha</label>
+                    <input type="password" id="senha" placeholder="Mínimo 6 caracteres" required minlength="6">
+                    <div class="requisitos">Mínimo 6 caracteres</div>
+                </div>
+                <div class="form-group">
+                    <label for="confirmar_senha">Confirmar Senha</label>
+                    <input type="password" id="confirmar_senha" placeholder="Repita a senha" required>
+                </div>
+                <button type="submit" class="btn-cadastrar" id="btnCadastrar">Criar Conta Gratuita</button>
+            </form>
+            <div class="login-link">
+                Já tem conta? <a href="/login.html">Fazer login</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('formCadastro').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const nome_empresa = document.getElementById('nome_empresa').value.trim();
+            const email = document.getElementById('email').value.trim();
+            const senha = document.getElementById('senha').value;
+            const confirmar = document.getElementById('confirmar_senha').value;
+            const msg = document.getElementById('msg');
+            const btn = document.getElementById('btnCadastrar');
+
+            msg.style.display = 'none';
+
+            if (senha !== confirmar) {
+                msg.textContent = 'As senhas não coincidem.';
+                msg.className = 'msg erro';
+                msg.style.display = 'block';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Cadastrando...';
+
+            try {
+                const res = await fetch('/api/saas/registrar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nome_empresa, email, senha })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    msg.textContent = '✅ Conta criada! Redirecionando para o login...';
+                    msg.className = 'msg sucesso';
+                    msg.style.display = 'block';
+                    setTimeout(() => window.location.href = '/login.html', 2000);
+                } else {
+                    msg.textContent = data.message || 'Erro ao cadastrar.';
+                    msg.className = 'msg erro';
+                    msg.style.display = 'block';
+                    btn.disabled = false;
+                    btn.textContent = 'Criar Conta Gratuita';
+                }
+            } catch (err) {
+                msg.textContent = 'Erro de conexão. Tente novamente.';
+                msg.className = 'msg erro';
+                msg.style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = 'Criar Conta Gratuita';
+            }
+        });
+    </script>
+</body>
+</html>

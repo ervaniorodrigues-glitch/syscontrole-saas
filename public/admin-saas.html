@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSMA - Painel do Gestor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; min-height: 100vh; }
+        .topbar {
+            background: #1a5276;
+            color: white;
+            padding: 14px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .topbar h1 { font-size: 20px; }
+        .topbar span { font-size: 13px; opacity: 0.8; }
+        .login-gestor {
+            max-width: 380px;
+            margin: 80px auto;
+            background: white;
+            border-radius: 10px;
+            padding: 32px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        .login-gestor h2 { margin-bottom: 20px; color: #1a5276; text-align: center; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 14px; color: #333; }
+        .form-group input {
+            width: 100%; padding: 10px 12px;
+            border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px;
+        }
+        .form-group input:focus { outline: none; border-color: #87CEEB; }
+        .btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; }
+        .btn-primary { background: #1a5276; color: white; }
+        .btn-primary:hover { background: #154360; }
+        .btn-success { background: #2e7d32; color: white; }
+        .btn-success:hover { background: #1b5e20; }
+        .btn-danger { background: #c62828; color: white; }
+        .btn-danger:hover { background: #b71c1c; }
+        .btn-warning { background: #e65100; color: white; }
+        .btn-warning:hover { background: #bf360c; }
+        .btn-full { width: 100%; }
+        .painel { max-width: 1550px; width: 96%; margin: 24px auto; padding: 0 16px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card {
+            background: white; border-radius: 8px; padding: 18px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08); text-align: center;
+            transition: all 0.2s;
+        }
+        .stat-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+        .stat-card:active { transform: translateY(0); }
+        .stat-card .numero { font-size: 32px; font-weight: bold; color: #1a5276; }
+        .stat-card .label { font-size: 13px; color: #666; margin-top: 4px; }
+        .tabela-container { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden; }
+        .tabela-header { padding: 16px 20px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; }
+        .tabela-header h3 { color: #1a5276; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f8f9fa; padding: 12px 14px; text-align: left; font-size: 13px; color: #555; border-bottom: 1px solid #eee; }
+        td { padding: 12px 14px; font-size: 13px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        tr { cursor: pointer; transition: background-color 0.2s; }
+        tr:hover td { background: #ebf5fb; }
+        tr.selected-row td { background: #d6eaf8 !important; border-bottom: 1px solid #aed6f1; }
+        .badge {
+            display: inline-block; padding: 3px 10px; border-radius: 12px;
+            font-size: 11px; font-weight: 600; text-transform: uppercase;
+        }
+        .badge-trial { background: #fff8e1; color: #e65100; }
+        .badge-pago { background: #e8f5e9; color: #2e7d32; }
+        .badge-expirado { background: #ffebee; color: #c62828; }
+        .badge-master { background: #e3f2fd; color: #1565c0; }
+        .badge-ativo { background: #e8f5e9; color: #2e7d32; }
+        .badge-inativo { background: #ffebee; color: #c62828; }
+        .acoes { display: flex; gap: 6px; flex-wrap: nowrap; white-space: nowrap; }
+        .acoes .btn { padding: 6px 10px; font-size: 12px; font-weight: 500; border-radius: 4px; }
+        .msg-topo { padding: 10px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; display: none; }
+        .msg-topo.sucesso { background: #e8f5e9; color: #2e7d32; }
+        .msg-topo.erro { background: #ffebee; color: #c62828; }
+        .filtro { padding: 12px 20px; border-bottom: 1px solid #eee; display: flex; gap: 10px; align-items: center; }
+        .filtro input { padding: 7px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 220px; }
+        .dias-restantes { font-weight: 600; }
+        .dias-ok { color: #2e7d32; }
+        .dias-aviso { color: #e65100; }
+        .dias-expirado { color: #c62828; }
+
+        /* Bolinha verde online */
+        .online-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background-color: #4caf50;
+            border-radius: 50%;
+            margin-right: 8px;
+            box-shadow: 0 0 0 rgba(76, 175, 80, 0.4);
+            animation: pulse-online 1.8s infinite;
+            vertical-align: middle;
+        }
+        @keyframes pulse-online {
+            0% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 8px rgba(76, 175, 80, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+            }
+        }
+
+        /* Estilos do Monitoramento (copiados do index.html/styles.css) */
+        .modal {
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5); align-items: center; justify-content: center;
+        }
+        .modal-content {
+            background-color: #fefefe; padding: 0; border: 1px solid #888; width: 90%; max-width: 1200px;
+            border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); overflow: hidden;
+        }
+        .modal-header {
+            padding: 12px 20px; background: #1a5276; color: white; display: flex;
+            align-items: center; justify-content: space-between;
+        }
+        .modal-header h2 { font-size: 18px; margin: 0; }
+        .modal-close { font-size: 24px; cursor: pointer; opacity: 0.8; }
+        .modal-close:hover { opacity: 1; }
+        .modal-body { padding: 20px; max-height: 80vh; overflow-y: auto; }
+
+        .modal-tabela-mes { max-width: 1600px; }
+        .mes-table-container { overflow: auto; border: 1px solid #ccc; border-radius: 4px; }
+        .tabela-mes { width: 100%; border-collapse: collapse; font-size: 11px; background: white; }
+        .tabela-mes th, .tabela-mes td { border: 1px solid #000 !important; padding: 2px 4px; text-align: center; }
+        .tabela-mes .header-mes { background-color: #f1f3f5; font-weight: 700; text-transform: uppercase; height: 20px; }
+        .tabela-mes .header-titulos { background-color: #449d44; color: white; font-weight: bold; position: sticky; top: 0; z-index: 10; }
+        .tabela-mes .col-funcao-empresa { text-align: left; font-weight: 600; min-width: 120px; }
+        .tabela-mes .col-dia-mes { width: 25px; }
+        .tabela-mes .col-total-mes { width: 40px; font-weight: bold; }
+        .tabela-mes .total-row { background-color: #1a1a1a; color: white; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>🛡️ SSMA — Painel do Gestor</h1>
+        <span id="topbarInfo"></span>
+    </div>
+
+    <!-- Tela de login do gestor -->
+    <div id="telaLogin" class="login-gestor">
+        <h2>🔐 Acesso Restrito</h2>
+        <div id="msgLogin" class="msg-topo"></div>
+        <div class="form-group">
+            <label>E-mail do Gestor</label>
+            <input type="email" id="emailGestor" placeholder="Digite seu e-mail de acesso">
+        </div>
+        <div class="form-group">
+            <label>Senha do Gestor</label>
+            <input type="password" id="senhaGestor" placeholder="Digite a senha do gestor">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="fazerLogin()">Entrar</button>
+        <div style="text-align: center; margin-top: 15px;">
+            <a href="#" onclick="esqueciSenha()" style="font-size: 13px; color: #1a5276; text-decoration: none;">Esqueci minha senha</a>
+        </div>
+    </div>
+
+    <!-- Painel principal -->
+    <div id="painelPrincipal" class="painel" style="display:none;">
+        <div class="top-controls" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <div id="msgPainel" class="msg-topo" style="margin:0; flex:1;"></div>
+            <button class="btn btn-warning" onclick="abrirAlterarSenha()" style="margin-left: 10px;">🔑 Alterar Minha Senha</button>
+        </div>
+
+        <div class="stats" id="statsCards"></div>
+
+        <div class="tabela-container" id="secaoSolicitacoes" style="margin-bottom:24px; display:none;">
+            <div class="tabela-header">
+                <h3>📋 Solicitações de Renovação Pendentes</h3>
+                <span id="badgePendentes" style="background:#e65100;color:white;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:bold;"></span>
+            </div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Empresa</th>
+                            <th>E-mail</th>
+                            <th>Nome Completo</th>
+                            <th>CPF</th>
+                            <th>Endereço</th>
+                            <th>Data</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabelaSolicitacoes"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="tabela-container">
+            <div class="tabela-header">
+                <h3>Empresas Cadastradas</h3>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-warning" id="btnExibir" onclick="toggleFiltroAtivo()">🚫 Ver Bloqueados</button>
+                    <button class="btn btn-primary" onclick="carregarTenants()">🔄 Atualizar</button>
+                </div>
+            </div>
+            <div class="filtro">
+                <input type="text" id="filtroTexto" placeholder="Filtrar por empresa ou e-mail..." oninput="filtrarTabela()">
+            </div>
+            <div style="overflow-x:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Empresa</th>
+                            <th>E-mail</th>
+                            <th>Plano</th>
+                            <th>Status</th>
+                            <th>Vencimento</th>
+                            <th>Dias Restantes</th>
+                            <th>Cadastro</th>
+                            <th>Últ. Pagto.</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabelaTenants"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Tabela MÊS - Monitoramento de 30 Dias -->
+    <div id="modalTabelaMes" class="modal">
+        <div class="modal-content modal-tabela-mes">
+            <div class="modal-header">
+                <h2 id="monitorTitle">📊 Monitoramento - 30 Dias</h2>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <button class="btn btn-success" id="btnExportarExcel" style="padding: 4px 12px; font-size: 12px;">📥 Exportar Excel</button>
+                    <span class="modal-close" onclick="fecharTabelaMes()">&times;</span>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="mes-table-container">
+                    <table id="tabelaMes" class="tabela-mes">
+                        <thead id="mesHeader"></thead>
+                        <tbody id="mesBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let senhaAtual = '';
+        let emailAtual = '';
+        let todosOsTenants = [];
+
+        function selecionarLinha(el) {
+            const trs = el.closest('tbody').querySelectorAll('tr');
+            trs.forEach(tr => tr.classList.remove('selected-row'));
+            el.classList.add('selected-row');
+        }
+
+        function fazerLogin() {
+            const email = document.getElementById('emailGestor').value;
+            const senha = document.getElementById('senhaGestor').value;
+            if (!senha || !email) return;
+            senhaAtual = senha;
+            emailAtual = email;
+            carregarTenants();
+        }
+
+        const inputsLogin = [document.getElementById('emailGestor'), document.getElementById('senhaGestor')];
+        inputsLogin.forEach(input => {
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') fazerLogin();
+            });
+        });
+
+        async function carregarTenants() {
+            try {
+                const res = await fetch('/api/saas/gestor/tenants', {
+                    headers: { 'x-gestor-senha': senhaAtual, 'x-gestor-email': emailAtual }
+                });
+
+                if (res.status === 401) {
+                    mostrarMsg('msgLogin', 'Senha incorreta.', 'erro');
+                    return;
+                }
+
+                const data = await res.json();
+                if (!data.success) return;
+
+                document.getElementById('telaLogin').style.display = 'none';
+                document.getElementById('painelPrincipal').style.display = 'block';
+                document.getElementById('topbarInfo').textContent = `Gestor conectado — ${new Date().toLocaleString('pt-BR')}`;
+
+                todosOsTenants = data.data;
+                renderizarStats(todosOsTenants);
+                
+                // Por padrão, mostrar apenas ativos no carregamento (ou manter o filtro atual)
+                aplicarFiltroPadrao();
+
+                // Carregar solicitações pendentes
+                carregarSolicitacoes();
+
+                // Agendar atualização automática do status online (a cada 10 segs)
+                if (!window.refreshIntervalSet) {
+                    window.refreshIntervalSet = true;
+                    setInterval(carregarTenants, 10000);
+                }
+            } catch (err) {
+                mostrarMsg('msgLogin', 'Erro de conexão.', 'erro');
+            }
+        }
+
+        let mostrarApenasAtivos = true;
+
+        function aplicarFiltroPadrao() {
+            const btn = document.getElementById('btnExibir');
+            if (mostrarApenasAtivos) {
+                renderizarTabela(todosOsTenants.filter(t => t.ativo));
+                btn.innerHTML = '🚫 Ver Bloqueados';
+                btn.className = 'btn btn-warning';
+            } else {
+                renderizarTabela(todosOsTenants.filter(t => !t.ativo));
+                btn.innerHTML = '✅ Ver Ativos';
+                btn.className = 'btn btn-success';
+            }
+        }
+
+        function toggleFiltroAtivo() {
+            mostrarApenasAtivos = !mostrarApenasAtivos;
+            aplicarFiltroPadrao();
+        }
+
+        async function carregarSolicitacoes() {
+            try {
+                const res = await fetch('/api/saas/gestor/solicitacoes', {
+                    headers: { 'x-gestor-senha': senhaAtual, 'x-gestor-email': emailAtual }
+                });
+                const data = await res.json();
+                if (!data.success) return;
+
+                const pendentes = data.data.filter(s => s.status === 'pendente');
+                const secao = document.getElementById('secaoSolicitacoes');
+                const badge = document.getElementById('badgePendentes');
+                const tbody = document.getElementById('tabelaSolicitacoes');
+
+                if (pendentes.length === 0) {
+                    secao.style.display = 'none';
+                    return;
+                }
+
+                secao.style.display = 'block';
+                badge.textContent = `${pendentes.length} pendente(s)`;
+
+                tbody.innerHTML = pendentes.map(s => {
+                    const data_sol = new Date(s.data_solicitacao).toLocaleString('pt-BR');
+                    return `
+                        <tr onclick="selecionarLinha(this)">
+                            <td><strong>${s.nome_empresa}</strong></td>
+                            <td>${s.email || '—'}</td>
+                            <td>${s.nome_completo}</td>
+                            <td>${s.cpf}</td>
+                            <td>${s.endereco}</td>
+                            <td>${data_sol}</td>
+                            <td>
+                                <div class="acoes">
+                                    <button class="btn btn-success" onclick="aprovarSolicitacao(${s.id}, '${s.nome_empresa}')">✅ Aprovar</button>
+                                    <button class="btn btn-danger" onclick="rejeitarSolicitacao(${s.id})">❌ Rejeitar</button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Erro ao carregar solicitações:', err);
+            }
+        }
+
+        async function aprovarSolicitacao(id, nome) {
+            if (!confirm(`Aprovar renovação de "${nome}"?\n\nIsso vai liberar o acesso pago por 30 dias.`)) return;
+            try {
+                const res = await fetch(`/api/saas/gestor/solicitacoes/aprovar/${id}`, {
+                    method: 'POST',
+                    headers: { 'x-gestor-senha': senhaAtual, 'x-gestor-email': emailAtual }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    mostrarMsg('msgPainel', `✅ Acesso de ${nome} liberado!`, 'sucesso');
+                    carregarTenants();
+                } else {
+                    mostrarMsg('msgPainel', data.message || 'Erro.', 'erro');
+                }
+            } catch (err) {
+                mostrarMsg('msgPainel', 'Erro de conexão.', 'erro');
+            }
+        }
+
+        async function rejeitarSolicitacao(id) {
+            if (!confirm('Rejeitar esta solicitação?')) return;
+            try {
+                const res = await fetch(`/api/saas/gestor/solicitacoes/rejeitar/${id}`, {
+                    method: 'POST',
+                    headers: { 'x-gestor-senha': senhaAtual, 'x-gestor-email': emailAtual }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    mostrarMsg('msgPainel', 'Solicitação rejeitada.', 'sucesso');
+                    carregarSolicitacoes();
+                }
+            } catch (err) {
+                mostrarMsg('msgPainel', 'Erro de conexão.', 'erro');
+            }
+        }
+
+        function renderizarStats(lista) {
+            const total = lista.length;
+            const trial = lista.filter(t => t.plano === 'trial' && !t.expirado).length;
+            const pagos = lista.filter(t => t.plano !== 'trial').length;
+            const expirados = lista.filter(t => t.expirado).length;
+            const inativos = lista.filter(t => !t.ativo).length;
+
+            document.getElementById('statsCards').innerHTML = `
+                <div class="stat-card" ondblclick="filtrarPorStat('todos')" style="cursor:pointer; user-select:none;"><div class="numero">${total}</div><div class="label">Total de Empresas</div></div>
+                <div class="stat-card" ondblclick="filtrarPorStat('trial')" style="cursor:pointer; user-select:none;"><div class="numero" style="color:#e65100">${trial}</div><div class="label">Em Trial</div></div>
+                <div class="stat-card" ondblclick="filtrarPorStat('pago')" style="cursor:pointer; user-select:none;"><div class="numero" style="color:#2e7d32">${pagos}</div><div class="label">Plano Pago</div></div>
+                <div class="stat-card" ondblclick="filtrarPorStat('expirado')" style="cursor:pointer; user-select:none;"><div class="numero" style="color:#c62828">${expirados}</div><div class="label">Expirados</div></div>
+                <div class="stat-card" ondblclick="filtrarPorStat('inativo')" style="cursor:pointer; user-select:none;"><div class="numero" style="color:#888">${inativos}</div><div class="label">Inativos</div></div>
+            `;
+        }
+
+        function renderizarTabela(lista) {
+            const tbody = document.getElementById('tabelaTenants');
+            if (lista.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;padding:30px;">Nenhuma empresa encontrada.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = lista.map(t => {
+                const planoBadge = t.expirado
+                    ? '<span class="badge badge-expirado">Expirado</span>'
+                    : t.plano === 'trial'
+                        ? '<span class="badge badge-trial">Trial</span>'
+                        : t.plano === 'master'
+                            ? '<span class="badge badge-master">Master</span>'
+                            : '<span class="badge badge-pago">Pago</span>';
+
+                const statusBadge = t.ativo
+                    ? '<span class="badge badge-ativo">Ativo</span>'
+                    : '<span class="badge badge-inativo">Inativo</span>';
+
+                let diasHtml = '—';
+                if (t.dias_restantes !== null) {
+                    const cls = t.expirado ? 'dias-expirado' : t.dias_restantes <= 5 ? 'dias-aviso' : 'dias-ok';
+                    diasHtml = `<span class="dias-restantes ${cls}">${t.expirado ? 'Expirado' : t.dias_restantes + ' dias'}</span>`;
+                }
+
+                const cadastro = t.data_cadastro ? new Date(t.data_cadastro).toLocaleDateString('pt-BR') : '—';
+                const vencimento = t.data_expiracao ? new Date(t.data_expiracao).toLocaleDateString('pt-BR') : '—';
+                const pagamento = t.data_pagamento ? new Date(t.data_pagamento).toLocaleDateString('pt-BR') : '—';
+
+                const onlineHtml = t.online ? '<span class="online-dot" title="Usuário ativo online"></span>' : '';
+                return `
+                    <tr onclick="selecionarLinha(this)">
+                        <td>${onlineHtml}<strong>${t.nome_empresa}</strong></td>
+                        <td>${t.email || '—'}</td>
+                        <td>${planoBadge}</td>
+                        <td>${statusBadge}</td>
+                        <td>${vencimento}</td>
+                        <td>${diasHtml}</td>
+                        <td>${cadastro}</td>
+                        <td>${pagamento}</td>
+                        <td>
+                            <div class="acoes">
+                                <button class="btn" style="background:#607d8b;color:white;" onclick="fazerBackupTenant('${t.id}', '${t.nome_empresa}')" title="Fazer Backup">📥 Backup</button>
+                                ${t.plano !== 'master' ? `<button class="btn btn-success" onclick="liberarAcesso('${t.id}', '${t.nome_empresa}')">✅ Liberar</button>` : ''}
+                                ${t.plano !== 'master' ? `<button class="btn btn-warning" onclick="estenderTrial('${t.id}', '${t.nome_empresa}')">⏱ +30 dias</button>` : ''}
+                                ${t.ativo && t.plano !== 'master' ? `<button class="btn btn-danger" onclick="bloquear('${t.id}', '${t.nome_empresa}')">🔒 Bloquear</button>` : ''}
+                                ${!t.ativo ? `<button class="btn" style="background:#7b1fa2;color:white;" onclick="deletarEmpresa('${t.id}', '${t.nome_empresa}')">🗑️ Deletar</button>` : ''}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function filtrarTabela() {
+            const texto = document.getElementById('filtroTexto').value.toLowerCase();
+            const filtrado = todosOsTenants.filter(t =>
+                (t.nome_empresa.toLowerCase().includes(texto) ||
+                (t.email || '').toLowerCase().includes(texto)) &&
+                (mostrarApenasAtivos ? t.ativo : !t.ativo)
+            );
+            renderizarTabela(filtrado);
+        }
+
+        function filtrarPorStat(tipo) {
+            let filtrado = todosOsTenants.filter(t => (mostrarApenasAtivos ? t.ativo : !t.ativo));
+            if (tipo === 'trial') {
+                filtrado = filtrado.filter(t => t.plano === 'trial' && !t.expirado);
+            } else if (tipo === 'pago') {
+                filtrado = filtrado.filter(t => t.plano !== 'trial');
+            } else if (tipo === 'expirado') {
+                filtrado = filtrado.filter(t => t.expirado);
+            } else if (tipo === 'inativo') {
+                // Se clicar em inativos, ignora o modo "apenas ativos" temporariamente
+                filtrado = todosOsTenants.filter(t => !t.ativo);
+            } else if (tipo === 'todos') {
+                // Se clicar em todos, ignora o modo "apenas ativos"
+                filtrado = todosOsTenants;
+            }
+            renderizarTabela(filtrado);
+            
+            // Limpar o filtro de texto para evitar confusão
+            document.getElementById('filtroTexto').value = '';
+        }
+
+        async function liberarAcesso(tenantId, nome) {
+            if (!confirm(`Liberar acesso PAGO para "${nome}"?\n\nIsso vai ativar o plano pago por 30 dias.`)) return;
+
+            try {
+                const res = await fetch(`/api/saas/gestor/liberar/${tenantId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-gestor-senha': senhaAtual, 'x-gestor-email': emailAtual },
+                    body: JSON.stringify({ plano: 'pago' })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    mostrarMsg('msgPainel', `✅ Acesso liberado para ${nome}!`, 'sucesso');
+                    carregarTenants();
+                } else {
+                    mostrarMsg('msgPainel', data.message || 'Erro ao liberar.', 'erro');
+                }
+            } catch (err) {
+                mostrarMsg('msgPainel', 'Erro de conexão.', 'erro');
+            }
+        }
+
+        async function estenderTrial(tenantId, nome) {
+            if (!confirm(`Estender trial de "${nome}" por mais 30 dias?`)) return;
+
+            try {
+                const res = await fetch(`/api/saas/gestor/estender/${tenantId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-gestor-senha': senhaAtual, 'x-gestor-email': emailAtual },
+                    body: JSON.stringify({ dias: 30 })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    mostrarMsg('msgPainel', `✅ Trial de ${nome} estendido por 30 dias!`, 'sucesso');
+                    carregarTenants();
+                } else {
+                    mostrarMsg('msgPainel', data.message || 'Erro.', 'erro');
+                }
+            } catch (err) {
+                mostrarMsg('msgPainel', 'Erro de conexão.', 'erro');
+            }
+        }
+
+        async function bloquear(tenantId, nome) {
+            if (!confirm(`Bloquear acesso de "${nome}"?`)) return;
+
+            try {
+                const res = await fetch(`/api/saas/gestor/bloquear/${tenantId}`, {
+                    method: 'POST',
+                    headers: { 'x-gestor-senha': senhaAtual, 'x-gestor-email': emailAtual }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    mostrarMsg('msgPainel', `🔒 ${nome} bloqueada.`, 'sucesso');
+                    carregarTenants();
+                } else {
+                    mostrarMsg('msgPainel', data.message || 'Erro.', 'erro');
+                }
+            } catch (err) {
+                mostrarMsg('msgPainel', 'Erro de conexão.', 'erro');
+            }
+        }
+
+        async function deletarEmpresa(tenantId, nome) {
+            if (!confirm(`⚠️ DELETAR "${nome}"?\n\nIsso vai apagar PERMANENTEMENTE:\n- O acesso da empresa\n- Todos os dados e banco de dados\n\nEssa ação é IRREVERSÍVEL.`)) return;
+            if (!confirm(`🔴 CONFIRMAÇÃO FINAL\n\nTem certeza que deseja deletar "${nome}" para sempre?`)) return;
+
+            try {
+                const res = await fetch(`/api/saas/gestor/deletar/${tenantId}`, {
+                    method: 'DELETE',
+                    headers: { 'x-gestor-senha': senhaAtual, 'x-gestor-email': emailAtual }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    mostrarMsg('msgPainel', `🗑️ ${nome} deletada permanentemente.`, 'sucesso');
+                    carregarTenants();
+                } else {
+                    mostrarMsg('msgPainel', data.message || 'Erro ao deletar.', 'erro');
+                }
+            } catch (err) {
+                mostrarMsg('msgPainel', 'Erro de conexão.', 'erro');
+            }
+        }
+
+        function mostrarMsg(id, texto, tipo) {
+            const el = document.getElementById(id);
+            el.textContent = texto;
+            el.className = `msg-topo ${tipo}`;
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 5000);
+        }
+
+        async function esqueciSenha() {
+            const email = document.getElementById('emailGestor').value;
+            if (!email) {
+                alert('Digite seu e-mail de acesso para receber a senha provisória.');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/saas/gestor/esqueci-senha', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    // Simulação para o usuário (em um sistema real seria enviado por e-mail)
+                    alert(`✅ SENHA ENVIADA!\n\nUma senha provisória foi gerada.\nVerifique seu console ou anote abaixo:\n\n${data.simulacao}`);
+                    document.getElementById('senhaGestor').value = data.simulacao.split(': ')[1];
+                } else {
+                    alert('Erro: ' + data.message);
+                }
+            } catch (err) { alert('Erro de conexão.'); }
+        }
+
+        function abrirAlterarSenha() {
+            document.getElementById('modalAlterarSenha').style.display = 'flex';
+        }
+
+        function fecharAlterarSenha() {
+            document.getElementById('modalAlterarSenha').style.display = 'none';
+        }
+
+        async function salvarNovaSenha() {
+            const nova = document.getElementById('novaSenhaGestor').value;
+            const confirma = document.getElementById('confirmaSenhaGestor').value;
+            
+            if (nova !== confirma) {
+                alert('As senhas não conferem.');
+                return;
+            }
+            if (nova.length < 4) {
+                alert('A senha deve ter pelo menos 4 caracteres.');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/saas/gestor/alterar-senha', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'x-gestor-email': emailAtual,
+                        'x-gestor-senha': senhaAtual
+                    },
+                    body: JSON.stringify({ novaSenha: nova })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    alert('✅ Senha alterada com sucesso! Use a nova senha no próximo acesso.');
+                    senhaAtual = nova;
+                    fecharAlterarSenha();
+                } else {
+                    alert('Erro: ' + data.message);
+                }
+            } catch (err) { alert('Erro de conexão.'); }
+        }
+
+        // --- FUNÇÕES DE MONITORAMENTO E BACKUP ---
+        let currentTenantId = '';
+        let currentTenantNome = '';
+
+        async function abrirMonitor(tenantId, nome) {
+            currentTenantId = tenantId;
+            currentTenantNome = nome;
+            document.getElementById('monitorTitle').innerHTML = `📊 Monitoramento - 30 Dias - <strong>${nome}</strong>`;
+            const modal = document.getElementById('modalTabelaMes');
+            
+            try {
+                mostrarMsg('msgPainel', `Carregando monitoramento de ${nome}...`, 'sucesso');
+                const res = await fetch('/api/tabela-mes/monitoramento?t=' + Date.now(), {
+                    headers: { 'x-tenant-id': tenantId }
+                });
+                const result = await res.json();
+                
+                if (!result.datas) throw new Error('Dados inválidos');
+                
+                gerarCabecalhoDuploMes(result.datas);
+                renderizarTabelaMes(result);
+                modal.style.display = 'flex';
+                
+                document.getElementById('btnExportarExcel').onclick = () => exportarTabelaMesExcel(result);
+
+            } catch (err) {
+                alert('Erro ao carregar monitoramento: ' + err.message);
+            }
+        }
+
+        function fecharTabelaMes() {
+            document.getElementById('modalTabelaMes').style.display = 'none';
+        }
+
+        function gerarCabecalhoDuploMes(datas) {
+            const mesesNoPeriodo = {};
+            datas.forEach(dt => {
+                if (!mesesNoPeriodo[dt.mesNome]) mesesNoPeriodo[dt.mesNome] = [];
+                mesesNoPeriodo[dt.mesNome].push(dt);
+            });
+            
+            const mesesOrdenados = Object.keys(mesesNoPeriodo);
+            let htmlLinha1 = '<th class="col-funcao-empresa" style="background-color: transparent; border: none;"></th>';
+            mesesOrdenados.forEach(nomeMes => {
+                htmlLinha1 += `<th colspan="${mesesNoPeriodo[nomeMes].length}" class="header-mes">${nomeMes}</th>`;
+            });
+            htmlLinha1 += '<th colspan="2" style="background-color: transparent; border: none;"></th>';
+
+            let htmlLinha2 = '<th class="col-funcao-empresa">FUNÇÃO / EMPRESA</th>';
+            datas.forEach(dt => {
+                const bgColor = dt.isDescanso ? 'background-color: #D9E8F5;' : '';
+                htmlLinha2 += `<th class="col-dia-mes" style="${bgColor}">${dt.dia}</th>`;
+            });
+            htmlLinha2 += '<th class="col-total-mes">P</th><th class="col-total-mes">F</th>';
+            
+            document.getElementById('mesHeader').innerHTML = `<tr>${htmlLinha1}</tr><tr class="header-titulos">${htmlLinha2}</tr>`;
+        }
+
+        function renderizarTabelaMes(result) {
+            const { datas, funcaoPorDia, empresaPorDia, faltasPorFuncaoPorDia } = result;
+            let htmlBody = '';
+            
+            // SEÇÃO FUNÇÃO
+            let totaisDiarios = Array(datas.length).fill(0);
+            let tTotalP = 0, tTotalF = 0;
+
+            Object.keys(funcaoPorDia).sort().forEach(func => {
+                let sP = 0, sF = 0;
+                let cols = datas.map((dt, i) => {
+                    const qP = funcaoPorDia[func][i] || 0;
+                    const qF = (faltasPorFuncaoPorDia && faltasPorFuncaoPorDia[func] && faltasPorFuncaoPorDia[func][i]) || 0;
+                    totaisDiarios[i] += qP;
+                    sP += qP; sF += qF;
+                    return `<td class="col-dia-mes" style="${dt.isDescanso?'background-color:#D9E8F5;':''}">${qP||''}</td>`;
+                }).join('');
+                tTotalP += sP; tTotalF += sF;
+                htmlBody += `<tr><td class="col-funcao-empresa"><strong>${func}</strong></td>${cols}<td class="col-total-mes" style="background:#C6EFCE;color:#006100;">${sP}</td><td class="col-total-mes" style="background:#FFC7CE;color:#9C0006;">${sF}</td></tr>`;
+            });
+
+            // Linha TOTAL
+            let totalRow = `<tr class="total-row"><td>TOTAL</td>`;
+            totaisDiarios.forEach(v => totalRow += `<td>${v}</td>`);
+            totalRow += `<td>${tTotalP}</td><td>${tTotalF}</td></tr>`;
+            htmlBody += totalRow;
+
+            // ESPAÇO
+            htmlBody += '<tr><td colspan="100%" style="height:20px; background:#f0f2f5; border:none;"></td></tr>';
+
+            // SEÇÃO EMPRESA
+            Object.keys(empresaPorDia).sort().forEach(emp => {
+                let sP = 0;
+                let cols = datas.map((dt, i) => {
+                    const qP = empresaPorDia[emp][i] || 0;
+                    sP += qP;
+                    return `<td class="col-dia-mes" style="${dt.isDescanso?'background-color:#D9E8F5;':''}">${qP||''}</td>`;
+                }).join('');
+                htmlBody += `<tr><td class="col-funcao-empresa"><em>${emp}</em></td>${cols}<td class="col-total-mes">${sP}</td><td></td></tr>`;
+            });
+
+            document.getElementById('mesBody').innerHTML = htmlBody;
+        }
+
+        async function fazerBackupTenant(tenantId, nome) {
+            try {
+                mostrarMsg('msgPainel', `Gerando backup de ${nome}...`, 'sucesso');
+                const res = await fetch('/api/backup/exportar', {
+                    headers: { 'x-tenant-id': tenantId }
+                });
+                if (!res.ok) throw new Error('Erro ao exportar');
+                const backup = await res.json();
+                
+                const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `backup_${tenantId}_${new Date().toISOString().slice(0,10)}.json`;
+                a.click();
+                mostrarMsg('msgPainel', `✅ Backup de ${nome} concluído!`, 'sucesso');
+            } catch (err) {
+                alert('Erro no backup: ' + err.message);
+            }
+        }
+
+        async function exportarTabelaMesExcel(result) {
+            const { datas, funcaoPorDia, empresaPorDia, faltasPorFuncaoPorDia } = result;
+            const workbook = new ExcelJS.Workbook();
+            const sheet = workbook.addWorksheet('Monitoramento 30 Dias');
+            
+            // Cabeçalho
+            const header1 = ['', ...datas.map(d => d.mesNome), '', ''];
+            const header2 = ['FUNÇÃO / EMPRESA', ...datas.map(d => d.dia), 'P', 'F'];
+            
+            sheet.addRow(header1);
+            sheet.addRow(header2);
+            
+            // Dados Funções
+            Object.keys(funcaoPorDia).sort().forEach(func => {
+                let sP = 0, sF = 0;
+                const row = [func];
+                datas.forEach((d, i) => {
+                    const qP = funcaoPorDia[func][i] || 0;
+                    const qF = (faltasPorFuncaoPorDia && faltasPorFuncaoPorDia[func] && faltasPorFuncaoPorDia[func][i]) || 0;
+                    sP += qP; sF += qF;
+                    row.push(qP || 0);
+                });
+                row.push(sP, sF);
+                sheet.addRow(row);
+            });
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `monitoramento_${currentTenantId}_30dias.xlsx`;
+            a.click();
+        }
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <!-- Modal Alterar Senha -->
+    <div id="modalAlterarSenha" class="modal">
+        <div class="modal-content" style="max-width: 400px; padding: 25px;">
+            <div class="modal-header" style="background: #e67e22;">
+                <h2>Alterar Senha do Gestor</h2>
+                <span class="modal-close" onclick="fecharAlterarSenha()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Nova Senha</label>
+                    <input type="password" id="novaSenhaGestor" placeholder="No mínimo 4 caracteres">
+                </div>
+                <div class="form-group">
+                    <label>Confirme a Nova Senha</label>
+                    <input type="password" id="confirmaSenhaGestor" placeholder="No mínimo 4 caracteres">
+                </div>
+                <button class="btn btn-warning btn-full" onclick="salvarNovaSenha()">Salvar Nova Senha</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

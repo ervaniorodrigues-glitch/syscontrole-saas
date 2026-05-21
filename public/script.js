@@ -1,4 +1,4 @@
-﻿// ⚠️⚠️⚠️ NÃO MEXER NO CÓDIGO SEM PEDIR PERMISSÃO AO ADMINISTRATOR ⚠️⚠️⚠️
+// ⚠️⚠️⚠️ NÃO MEXER NO CÓDIGO SEM PEDIR PERMISSÃO AO ADMINISTRATOR ⚠️⚠️⚠️
 // ⚠️⚠️⚠️ NÃO MEXER NO CÓDIGO SEM PEDIR PERMISSÃO AO ADMINISTRATOR ⚠️⚠️⚠️
 // ⚠️⚠️⚠️ NÃO MEXER NO CÓDIGO SEM PEDIR PERMISSÃO AO ADMINISTRATOR ⚠️⚠️⚠️
 
@@ -7,6 +7,7 @@
 
 class SysControleWeb {
     constructor() {
+        this.tabelaMesApenasAtivos = false; // Estado para filtro "Ativos Hoje"
         this.currentPage = 1;
         this.pageSize = 10;
         this.totalPages = 1;
@@ -22,18 +23,386 @@ class SysControleWeb {
         this.fotoRemovida = false; // Flag para indicar remoção de foto
         this.cursosHabilitadosCache = null; // Cache para cursos habilitados
         
+        // Mapeamento de carga horária por curso (NR)
+        // ATENÇÃO: Apenas NRs que TÊM certificado entram na regra de horas
+        // EPI, NR-17, NR-34 e ASO NÃO têm certificado → não contam
+        this.NR_DURATIONS = {
+            'nr06': 4,
+            'nr10': 40,
+            'nr11': 4,
+            'nr12': 4,
+            'nr17': 4,
+            'nr18': 4,
+            'nr20': 16,
+            'nr33': 16,
+            'nr35': 8
+        };
+        
         // Inicializar filtros de fornecedor
         this.filtroMostrarApenasAtivos = true;
         this.filtroMostrarApenasInativos = false;
         
+        // Rastreamento
+        this.mostrarOcultosRastreamento = false;
+        
         // Usuário logado
         this.currentUser = null;
+        this.formOriginalSnapshot = null;
         
         this.init();
     }
+
+    /**
+     * Calcula o total de horas de treinamento de um funcionário em uma data específica.
+     * @param {Object} empData Dados do funcionário.
+     * @param {string} dataAlvo Data no formato ISO (yyyy-mm-dd).
+     * @returns {number} Total de horas.
+     */
+    /**
+     * Cursos de UM DIA (possuem certificado, carga fixa no dia)
+     * NR-33 e NR-20 são MULTI-DIA → não entram aqui
+     */
+    _mappingCursosUmDia() {
+        return {
+            'nr06': 'Nr06_DataEmissao',
+            'nr10': 'Nr10_DataEmissao',
+            'nr11': 'Nr11_DataEmissao',
+            'nr12': 'Nr12_DataEmissao',
+            'nr17': 'Nr17_DataEmissao',
+            'nr18': 'Nr18_DataEmissao',
+            'nr35': 'Nr35_DataEmissao'
+        };
+    }
+
+    /**
+     * Calcula o total de horas de cursos de UM DIA em uma data específica.
+     * NR-33 e NR-20 são excluídos pois são cursos multi-dia.
+     */
+    calcularTotalHorasNoDia(empData, dataAlvo) {
+        if (!empData || !dataAlvo) return 0;
+        let totalHoras = 0;
+        let cursosNoDia = 0;
+        const mapping = this._mappingCursosUmDia();
+
+        // Normalizar dataAlvo para yyyy-mm-dd
+        const normalizarData = (d) => {
+            if (!d || typeof d !== 'string') return '';
+            const s = d.split('T')[0]; // remover hora se existir
+            // Se formato dd/mm/yyyy → converter para yyyy-mm-dd
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+                const [dd, mm, yyyy] = s.split('/');
+                return `${yyyy}-${mm}-${dd}`;
+            }
+            return s;
+        };
+
+        const alvo = normalizarData(dataAlvo);
+
+        Object.keys(mapping).forEach(nr => {
+            const dbDate = empData[mapping[nr]];
+            if (dbDate) {
+                const datePart = normalizarData(dbDate);
+                if (datePart === alvo) {
+                    totalHoras += this.NR_DURATIONS[nr] || 0;
+                    cursosNoDia++;
+                }
+            }
+        });
+        return { total: totalHoras, cursos: cursosNoDia };
+    }
+
+    /**
+     * Verifica se uma data (yyyy-mm-dd) cai dentro do período de um curso multi-dia.
+     * NR-33: usa Nr33_DataEmissao (início) e Nr33_DataFim (fim)
+     * NR-20: usa Nr20_DataEmissao como único dia de referência (sem DataFim no banco)
+     */
+    _dataCaiNoPeriodoMultiDia(empData, dataAlvo) {
+        // Verificar NR-33
+        const nr33Inicio = empData['Nr33_DataEmissao'];
+        const nr33Fim    = empData['Nr33_DataFim'];
+        if (nr33Inicio) {
+            const inicio = nr33Inicio.split('T')[0];
+            const fim    = nr33Fim ? nr33Fim.split('T')[0] : inicio;
+            if (dataAlvo >= inicio && dataAlvo <= fim) return true;
+        }
+        // Verificar NR-20 (sem DataFim → trata como dia único)
+        const nr20Inicio = empData['Nr20_DataEmissao'];
+        if (nr20Inicio) {
+            const inicio = nr20Inicio.split('T')[0];
+            if (dataAlvo === inicio) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Verifica se um certificado específico está vencido.
+     */
+    isCertificadoVencido(empData, nrPrefix) {
+        if (!empData) return false;
+        
+        const mappingVenc = {
+            'aso': 'Vencimento',
+            'nr06': 'Nr06_Vencimento',
+            'nr10': 'Nr10_Vencimento',
+            'nr11': 'Nr11_Vencimento',
+            'nr12': 'NR12_Vencimento',
+            'nr17': 'Nr17_Vencimento',
+            'nr18': 'NR18_Vencimento',
+            'nr20': 'Nr20_Vencimento',
+            'nr33': 'NR33_Vencimento',
+            'nr34': 'Nr34_Vencimento',
+            'nr35': 'NR35_Vencimento',
+            'epi': 'epiVencimento'
+        };
+
+        const dataVenc = empData[mappingVenc[nrPrefix]];
+        if (!dataVenc) return false;
+        
+        // Comparar com a data atual (considerando apenas ano-mes-dia)
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        
+        const venc = new Date(dataVenc);
+        // Garantir que a comparação de fuso horário não interfira (usar UTC ou normalizar)
+        venc.setHours(0, 0, 0, 0);
+
+        return venc < hoje;
+    }
+
+    /**
+     * Verifica se um certificado específico é inválido (excede 8h no dia).
+     */
     
+    adicionarBotoesImpressao() {
+        const nrs = ['06', '10', '11', '12', '17', '18', '20', '33', '35'];
+        nrs.forEach(nr => {
+            const modal = document.getElementById('modalCertNR' + nr);
+            if (!modal) return;
+            
+            // Look for existing vertically stacked container and remove it to prevent duplicates
+            let existingMenu = modal.querySelector('.print-menu-vertical');
+            if (existingMenu) existingMenu.remove();
+            
+            // the config button that acts as an anchor
+            const cfgBtn = modal.querySelector('button[onclick*="abrirCfgNR' + nr + '"]');
+            
+            // Remove inline buttons if they still exist from the old version
+            if (cfgBtn && cfgBtn.parentElement) {
+                const headerDiv = cfgBtn.parentElement;
+                ['btn-print-frente', 'btn-print-verso', 'btn-print-ambos'].forEach(cls => {
+                    const el = headerDiv.querySelector('.' + cls);
+                    if (el) el.remove();
+                });
+            }
+
+            const printMenu = document.createElement('div');
+            printMenu.className = 'print-menu-vertical';
+            printMenu.style.cssText = 'position:absolute; top:65px; right:20px; z-index:200000; display:flex; flex-direction:column; gap:8px;';
+
+            // Same base style as Configuração button
+            const btnStyle = 'background:#444; color:#fff; border:1px solid #666; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold; font-size:14px; transition:0.2s; width: 140px; text-align: center;';
+
+            const addHover = (btn) => {
+                btn.onmouseover = () => btn.style.backgroundColor = '#666';
+                btn.onmouseout = () => btn.style.backgroundColor = '#444';
+            };
+
+            const btnFrente = document.createElement('button');
+            btnFrente.innerHTML = '🖨️ Frente';
+            btnFrente.style.cssText = btnStyle;
+            btnFrente.onclick = () => this.imprimirCertificado('nr' + nr, 'frente');
+            btnFrente.title = "Imprimir apenas a frente do certificado";
+            addHover(btnFrente);
+            
+            const btnVerso = document.createElement('button');
+            btnVerso.innerHTML = '🖨️ Verso';
+            btnVerso.style.cssText = btnStyle;
+            btnVerso.onclick = () => this.imprimirCertificado('nr' + nr, 'verso');
+            btnVerso.title = "Imprimir apenas o verso (Conteúdo Programático)";
+            addHover(btnVerso);
+            
+            const btnAmbos = document.createElement('button');
+            btnAmbos.innerHTML = '🖨️ Completo';
+            btnAmbos.style.cssText = btnStyle;
+            btnAmbos.onclick = () => this.imprimirCertificado('nr' + nr, 'ambos');
+            btnAmbos.title = "Imprimir frente e verso";
+            addHover(btnAmbos);
+            
+            printMenu.appendChild(btnFrente);
+            printMenu.appendChild(btnVerso);
+            printMenu.appendChild(btnAmbos);
+
+            modal.appendChild(printMenu);
+        });
+    }
+
+    imprimirCertificado(nr, modo = 'ambos') {
+        const previewId = 'cert' + nr.toUpperCase() + '_preview';
+        const preview = document.getElementById(previewId);
+        if (!preview) return;
+
+        const nomeEl = document.getElementById('nome');
+        const nome = this._corrigirTexto((nomeEl ? nomeEl.value : '').toUpperCase());
+        const styleElement = document.getElementById('cert' + nr.replace('nr','') + '-style');
+
+        let printCSS = '';
+        if (modo === 'frente') {
+            printCSS = '.page-0 { display: block !important; break-after: auto !important; page-break-after: auto !important; } .page-1 { display: none !important; }';
+        } else if (modo === 'verso') {
+            printCSS = '.page-0 { display: none !important; } .page-1 { display: block !important; break-after: auto !important; page-break-after: auto !important; }';
+        } else {
+            // Completo: no preview mostra só a frente, na impressão sai frente+verso
+            printCSS = `
+                .page-0 { display: block !important; }
+                .page-1 { display: none !important; }
+                @media print {
+                    .page-0 { display: block !important; page-break-after: always !important; break-after: page !important; }
+                    .page-1 { display: block !important; page-break-after: avoid !important; break-after: auto !important; }
+                }
+            `;
+        }
+
+        const janela = window.open('', '_blank', 'width=1100,height=800');
+        janela.document.write(`
+            <!DOCTYPE html><html><head><title>Certificado ${nr.toUpperCase()} - ${nome}</title>
+             <style>${styleElement ? styleElement.innerHTML : ''}</style>
+             <style>
+                 @page { size: A4 landscape; margin: 0; }
+                 html, body { height: auto !important; } 
+                 .cert-container { display: flex !important; }
+                 .cert-frente { page-break-after: ${modo === 'frente' ? 'auto' : 'always'} !important; break-after: ${modo === 'frente' ? 'auto' : 'page'} !important; }
+                 .cert-verso { page-break-after: avoid !important; break-after: auto !important; }
+                 .cert-nav-arrow { display: none !important; }
+                 ${printCSS}
+             </style>
+            </head><body>
+                <div id="${previewId}">
+                    ${preview.innerHTML}
+                </div>
+                <script>window.onload=function(){setTimeout(function(){window.print();window.onafterprint=function(){window.close();};},500);};</script>
+            </body></html>`);
+        janela.document.close();
+    }
+isCertificadoInvalido(empData, nrPrefix) {
+        if (!empData) return false;
+        
+        if (empData.IgnorarInvalidez === 'S') return false;
+
+        // ── Cursos MULTI-DIA (NR-33 e NR-20) ──────────────────────────────
+        // Regra: são inválidos SOMENTE se outro certificado de 1 dia
+        // tiver data igual ao período de início→fim do multi-dia.
+        if (nrPrefix === 'nr33' || nrPrefix === 'nr20') {
+            const inicioField = nrPrefix === 'nr33' ? 'Nr33_DataEmissao' : 'Nr20_DataEmissao';
+            const fimField    = nrPrefix === 'nr33' ? 'Nr33_DataFim'     : null;
+            const dataInicio  = empData[inicioField];
+            if (!dataInicio) return false;
+            const inicio = dataInicio.split('T')[0];
+            const fim    = (fimField && empData[fimField]) ? empData[fimField].split('T')[0] : inicio;
+
+            // Verificar se algum curso de 1 dia tem data dentro do período
+            const mappingUmDia = this._mappingCursosUmDia();
+            for (const nr of Object.keys(mappingUmDia)) {
+                const d = empData[mappingUmDia[nr]];
+                if (d) {
+                    const dia = d.split('T')[0];
+                    if (dia >= inicio && dia <= fim) return true; // conflito!
+                }
+            }
+            return false; // nenhum conflito → válido
+        }
+
+        // ── Cursos de UM DIA (NR-06, NR-10, NR-12, NR-18, NR-35) ─────────
+        // Regra 1: soma de horas no mesmo dia não pode ultrapassar 8h
+        // Regra 2: a data não pode cair dentro de um período multi-dia (NR-33/NR-20)
+        const mappingUmDia = this._mappingCursosUmDia();
+        const dataEmissao = empData[mappingUmDia[nrPrefix]];
+        if (!dataEmissao || typeof dataEmissao !== 'string') return false;
+        // Normalizar: dd/mm/yyyy → yyyy-mm-dd
+        const normData = (d) => {
+            const s = d.split('T')[0];
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { const [dd,mm,yyyy]=s.split('/'); return `${yyyy}-${mm}-${dd}`; }
+            return s;
+        };
+        const dataAlvo = normData(dataEmissao);
+        if (!dataAlvo || dataAlvo.length < 10) return false;
+
+        // Inválido se: 2+ cursos no mesmo dia e a soma ultrapassar 8h
+        const { total, cursos } = this.calcularTotalHorasNoDia(empData, dataAlvo);
+        if (cursos >= 2 && total > 8) return true;
+
+        // Regra 2: data cai dentro de um período multi-dia?
+        if (this._dataCaiNoPeriodoMultiDia(empData, dataAlvo)) return true;
+
+        return false;
+    }
+
+    // Verifica se o registro possui qualquer certificado inválido (carga horária excedida)
+    verificarSePossuiCertificadoInvalido(item) {
+        if (!item) return false;
+        if (item.IgnorarInvalidez === 'S') return false;
+
+        // Normalizar: dd/mm/yyyy → yyyy-mm-dd
+        const normData = (d) => {
+            if (!d || typeof d !== 'string') return '';
+            const s = d.split('T')[0];
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { const [dd,mm,yyyy]=s.split('/'); return `${yyyy}-${mm}-${dd}`; }
+            return s;
+        };
+
+        // Verificar cursos de 1 dia: soma no mesmo dia > 8h?
+        const mappingUmDia = this._mappingCursosUmDia();
+        const datasUmDia = new Set();
+        Object.values(mappingUmDia).forEach(field => {
+            const d = item[field];
+            const norm = normData(d);
+            if (norm && norm.length >= 10) datasUmDia.add(norm);
+        });
+        for (const data of datasUmDia) {
+            const { total, cursos } = this.calcularTotalHorasNoDia(item, data);
+            if (cursos >= 2 && total > 8) return true;
+            if (this._dataCaiNoPeriodoMultiDia(item, data)) return true;
+        }
+
+        // Verificar cursos multi-dia: algum curso de 1 dia cai no período?
+        const nrsMultiDia = ['nr33', 'nr20'];
+        for (const nr of nrsMultiDia) {
+            if (this.isCertificadoInvalido(item, nr)) return true;
+        }
+
+        return false;
+    }
+
+    
+    // 🛡️ BLOQUEAR INTERFERÊNCIA DE EXTENSÕES E CORRETORES EXTERNOS
+    bloquearInterferenciaNavegador() {
+        try {
+            const inputs = document.querySelectorAll('input[type="text"], textarea, input[type="search"]');
+            inputs.forEach(el => {
+                // Apenas injeta se não estiver configurado para evitar consumo excessivo de ciclos
+                if (el.getAttribute('spellcheck') !== 'false') {
+                    el.setAttribute('spellcheck', 'false');
+                    el.setAttribute('autocomplete', 'off');
+                    el.setAttribute('autocorrect', 'off');
+                    el.setAttribute('autocapitalize', 'off');
+                    // Bloqueadores de extensões específicas (Grammarly, LanguageTool, etc)
+                    el.setAttribute('data-gramm', 'false');
+                    el.setAttribute('data-gramm_editor', 'false');
+                    el.setAttribute('data-enable-grammarly', 'false');
+                    el.setAttribute('data-lt-active', 'false');
+                    el.setAttribute('disable-grammarly', 'true');
+                }
+            });
+        } catch (err) {
+            // Supressão silenciosa para não poluir console
+        }
+    }
+
     init() {
         console.log('Inicializando SysControle Web...');
+        
+        // 🛡️ Ativar escudo anti-interferências externas instantaneamente
+        this.bloquearInterferenciaNavegador();
+        setInterval(() => this.bloquearInterferenciaNavegador(), 1500);
         
         // Verificar login
         this.verificarLogin();
@@ -45,6 +414,7 @@ class SysControleWeb {
         
         // Inicializar histórico de pesquisa
         this.initSearchHistory();
+        this.adicionarBotoesImpressao();
 
         // Aguardar um pouco para garantir que o DOM está pronto
         setTimeout(async () => {
@@ -372,6 +742,12 @@ class SysControleWeb {
     }
     
     logout() {
+        // Verificar se há alterações não salvas antes de sair totalmente
+        if (this.isFormDirty()) {
+            if (!confirm('Deseja sair do sistema sem salvar as alterações? Os dados serão perdidos.')) {
+                return;
+            }
+        }
         sessionStorage.removeItem('user');
         window.location.href = '/login.html';
     }
@@ -384,6 +760,13 @@ class SysControleWeb {
         }
         
         document.getElementById('modalUsuarios').style.display = 'flex';
+        
+        // Exibir o Código/Chave da Empresa no topo do modal
+        const display = document.getElementById('displayCodigoTenant');
+        if (display) {
+            display.textContent = this.currentUser.tenant_id || 'Disponível no Footer';
+        }
+
         await this.carregarListaUsuarios();
     }
     
@@ -400,7 +783,8 @@ class SysControleWeb {
                 const tbody = document.getElementById('listaUsuarios');
                 tbody.innerHTML = result.data.map(u => `
                     <tr style="border-bottom: 1px solid #ddd;">
-                        <td style="padding: 10px;">${u.login}</td>
+                        <td style="padding: 10px; font-weight: 500;">${u.login}</td>
+                        <td style="padding: 10px; font-family: monospace; color: #d35400; font-weight: bold;">${u.id === 1 ? '••••••••' : u.senha}</td>
                         <td style="padding: 10px;">${u.nome}</td>
                         <td style="padding: 10px; text-align: center;">
                             <span style="padding: 3px 8px; border-radius: 3px; background: ${u.tipo === 'master' ? '#4CAF50' : u.tipo === 'intermediario' ? '#FF9800' : '#2196F3'}; color: white; font-size: 12px;">
@@ -410,15 +794,22 @@ class SysControleWeb {
                         <td style="padding: 10px; text-align: center;">
                             <span style="color: ${u.ativo ? 'green' : 'red'};">${u.ativo ? '✓ Ativo' : '✗ Inativo'}</span>
                         </td>
-                        <td style="padding: 10px; text-align: center;">
-                            ${u.id !== 1 ? `
-                                <button onclick="syscontrole.toggleUsuario(${u.id}, ${!u.ativo})" style="padding: 5px 10px; margin: 2px; border: none; border-radius: 3px; cursor: pointer; background: ${u.ativo ? '#ff9800' : '#4CAF50'}; color: white;">
-                                    ${u.ativo ? 'Desativar' : 'Ativar'}
-                                </button>
-                                <button onclick="syscontrole.excluirUsuario(${u.id})" style="padding: 5px 10px; margin: 2px; border: none; border-radius: 3px; cursor: pointer; background: #f44336; color: white;">
-                                    Excluir
-                                </button>
-                            ` : '<span style="color: #999;">Protegido</span>'}
+                        <td style="padding: 10px; text-align: center; white-space: nowrap;">
+                            ${u.id === 1 ? `
+                                <span style="color: #999; font-weight: bold;">Protegido</span>
+                            ` : `
+                                <div style="display: flex; flex-wrap: nowrap; gap: 4px; justify-content: center; align-items: center;">
+                                    <button onclick="syscontrole.copiarDadosAcesso('${u.login}', '${u.senha}')" style="padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer; background: #2196F3; color: white; font-weight: bold; white-space: nowrap;" title="Copiar todos os dados de acesso (Código, Login e Senha)">
+                                        📋 Copiar Acesso
+                                    </button>
+                                    <button onclick="syscontrole.toggleUsuario(${u.id}, ${!u.ativo})" style="padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer; background: ${u.ativo ? '#ff9800' : '#4CAF50'}; color: white; white-space: nowrap;">
+                                        ${u.ativo ? 'Desativar' : 'Ativar'}
+                                    </button>
+                                    <button onclick="syscontrole.excluirUsuario(${u.id})" style="padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer; background: #f44336; color: white; white-space: nowrap;">
+                                        Excluir
+                                    </button>
+                                </div>
+                            `}
                         </td>
                     </tr>
                 `).join('');
@@ -428,6 +819,45 @@ class SysControleWeb {
         }
     }
     
+    copiarDadosAcesso(login, senha, alertConfirmacao = false) {
+        const tenantId = this.currentUser.tenant_id || 'ervanio-1234';
+        const link = window.location.origin + '/login.html';
+        const texto = `*🔑 DADOS DE ACESSO AO SISTEMA SYSCONTROLE*\n\n` +
+                      `🏢 *Código da Empresa:* ${tenantId}\n` +
+                      `👤 *Login:* ${login}\n` +
+                      `🔒 *Senha:* ${senha}\n\n` +
+                      `🌐 *Link para Acesso:* ${link}`;
+        
+        const copiarParaClipboard = () => {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(texto).then(() => {
+                    this.showToast('Dados de acesso copiados com sucesso!', 'success');
+                }).catch(() => this.fallbackCopiar(texto));
+            } else {
+                this.fallbackCopiar(texto);
+            }
+        };
+
+        if (alertConfirmacao) {
+            alert(`✅ USUÁRIO CRIADO COM SUCESSO!\n\nOs dados de acesso abaixo já foram copiados para você colar no WhatsApp do seu funcionário:\n\n🏢 Código da Empresa: ${tenantId}\n👤 Login: ${login}\n🔒 Senha: ${senha}\n\n(Clique em OK para fechar esta mensagem)`);
+        }
+        
+        copiarParaClipboard();
+    }
+
+    fallbackCopiar(texto) {
+        const el = document.createElement('textarea');
+        el.value = texto;
+        el.setAttribute('readonly', '');
+        el.style.position = 'absolute';
+        el.style.left = '-9999px';
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+        this.showToast('Dados de acesso copiados!', 'success');
+    }
+
     async criarUsuario() {
         const login = document.getElementById('novoUserLogin').value.trim();
         const senha = document.getElementById('novoUserSenha').value;
@@ -449,10 +879,14 @@ class SysControleWeb {
             const result = await response.json();
             
             if (result.success) {
-                this.showToast('Usuário criado com sucesso', 'success');
+                // Limpar campos antes do alert para o UI atualizar
                 document.getElementById('novoUserLogin').value = '';
                 document.getElementById('novoUserSenha').value = '';
                 document.getElementById('novoUserNome').value = '';
+                
+                // Copiar os dados de acesso e mostrar um alerta com resumo
+                this.copiarDadosAcesso(login, senha, true);
+                
                 await this.carregarListaUsuarios();
             } else {
                 this.showToast(result.message, 'error');
@@ -507,6 +941,12 @@ class SysControleWeb {
         }
         
         document.getElementById('modalBackup').style.display = 'flex';
+
+        // Restaurar URL do Render salva
+        const urlSalva = localStorage.getItem('syscontrole_render_url') || '';
+        const inputUrl = document.getElementById('renderUrl');
+        if (inputUrl && urlSalva) inputUrl.value = urlSalva;
+
         await this.carregarContagensBackup();
     }
     
@@ -590,6 +1030,75 @@ class SysControleWeb {
         }
     }
     
+    salvarUrlRender() {
+        const input = document.getElementById('renderUrl');
+        const url = input.value.trim().replace(/\/$/, '');
+        if (!url || !url.startsWith('http')) {
+            this.showToast('Informe uma URL válida (ex: https://seu-app.onrender.com)', 'error');
+            return;
+        }
+        localStorage.setItem('syscontrole_render_url', url);
+        this.showToast('URL do Render salva!', 'success');
+    }
+
+    async enviarParaRender() {
+        const urlSalva = localStorage.getItem('syscontrole_render_url') || '';
+        const inputUrl = document.getElementById('renderUrl');
+        if (urlSalva && !inputUrl.value.trim()) inputUrl.value = urlSalva;
+
+        const url = (inputUrl.value.trim() || urlSalva).replace(/\/$/, '');
+        if (!url || !url.startsWith('http')) {
+            this.showToast('Informe a URL do Render antes de enviar', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('btnEnviarRender');
+        const status = document.getElementById('statusEnvioRender');
+
+        try {
+            btn.disabled = true;
+            status.textContent = '⏳ Gerando backup...';
+            status.style.color = '#666';
+
+            // 1. Gerar backup local
+            const respBackup = await fetch('/api/backup/exportar');
+            if (!respBackup.ok) throw new Error('Falha ao gerar backup local: ' + respBackup.status);
+            const backupData = await respBackup.json();
+            if (backupData.error) throw new Error(backupData.error);
+
+            const totalFuncs = backupData.dados?.funcionarios?.length || 0;
+            status.textContent = `⏳ Enviando ${totalFuncs} funcionários para o Render...`;
+
+            // 2. Enviar para o Render
+            const respEnvio = await fetch(`${url}/api/backup/restaurar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(backupData)
+            });
+
+            if (!respEnvio.ok) {
+                const errText = await respEnvio.text();
+                throw new Error(`Render retornou erro ${respEnvio.status}: ${errText.substring(0, 200)}`);
+            }
+
+            const result = await respEnvio.json();
+            if (!result.success) throw new Error(result.error || 'Erro desconhecido no Render');
+
+            status.textContent = `✅ Enviado! ${totalFuncs} funcionários sincronizados.`;
+            status.style.color = '#2e7d32';
+            this.showToast(`✅ Dados enviados para o Render com sucesso!`, 'success');
+            localStorage.setItem('syscontrole_render_url', url);
+
+        } catch (err) {
+            console.error('Erro ao enviar para o Render:', err);
+            status.textContent = '❌ ' + err.message;
+            status.style.color = '#c62828';
+            this.showToast('Erro ao enviar: ' + err.message, 'error');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     async restaurarBackup() {
         const fileInput = document.getElementById('arquivoBackup');
         const file = fileInput.files[0];
@@ -836,6 +1345,47 @@ class SysControleWeb {
     }
     
     bindEvents() {
+        // Auto-completar ano em todos os campos de data ao pressionar Tab ou sair do campo
+        const camposData = [
+            { id: 'dataEmissao',     fn: () => { this.completarAnoAtual({target: document.getElementById('dataEmissao')}); } },
+            { id: 'nr06_dataEmissao', fn: () => { this.completarAnoAtualNR06({target: document.getElementById('nr06_dataEmissao')}); } },
+            { id: 'nr10_dataEmissao', fn: () => { this.completarAnoAtualNR10({target: document.getElementById('nr10_dataEmissao')}); } },
+            { id: 'nr11_dataEmissao', fn: () => { this.completarAnoAtualNR11({target: document.getElementById('nr11_dataEmissao')}); } },
+            { id: 'nr12_dataEmissao', fn: () => { this.completarAnoAtualNR12({target: document.getElementById('nr12_dataEmissao')}); } },
+            { id: 'nr17_dataEmissao', fn: () => { this.completarAnoAtualNR17({target: document.getElementById('nr17_dataEmissao')}); } },
+            { id: 'nr18_dataEmissao', fn: () => { this.completarAnoAtualNR18({target: document.getElementById('nr18_dataEmissao')}); } },
+            { id: 'nr20_dataEmissao', fn: () => { this.completarAnoAtualNR20({target: document.getElementById('nr20_dataEmissao')}); } },
+            { id: 'nr33_dataEmissao', fn: () => { this.completarAnoAtualNR33({target: document.getElementById('nr33_dataEmissao')}); } },
+            { id: 'nr34_dataEmissao', fn: () => { this.completarAnoAtualNR34({target: document.getElementById('nr34_dataEmissao')}); } },
+            { id: 'nr35_dataEmissao', fn: () => { this.completarAnoAtualNR35({target: document.getElementById('nr35_dataEmissao')}); } },
+            { id: 'epi_dataEmissao',  fn: () => { this.completarAnoAtualEPI({target: document.getElementById('epi_dataEmissao')}); } },
+        ];
+
+        camposData.forEach(({ id, fn }) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            // Tab ou blur: completar ano se digitou só dd/mm
+            el.addEventListener('blur', fn);
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') fn();
+            });
+        });
+        // Interceptar Ctrl+P: se um modal de certificado estiver aberto, imprimir frente+verso corretamente
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'p') {
+                const nrs = ['NR06', 'NR10', 'NR11', 'NR12', 'NR18', 'NR20', 'NR33', 'NR35'];
+                for (const nr of nrs) {
+                    const modal = document.getElementById('modalCert' + nr);
+                    if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
+                        e.preventDefault();
+                        e.stopImmediatePropagation();
+                        this.imprimirCertificado(nr.toLowerCase(), 'ambos');
+                        return;
+                    }
+                }
+            }
+        }, true); // capture=true para interceptar antes do browser
+
         // REGRA SUPREMA: Botões de salvar/cadastrar/alterar NUNCA recebem foco via TAB
         document.querySelectorAll('.btn-cadastrar, .btn-alterar, .btn-salvar, [id^="btnSalvar"], .btn-novo').forEach(btn => {
             btn.setAttribute('tabindex', '-1');
@@ -844,6 +1394,17 @@ class SysControleWeb {
         // Campos readonly NUNCA recebem foco via TAB
         document.querySelectorAll('input[readonly], .readonly-field').forEach(field => {
             field.setAttribute('tabindex', '-1');
+        });
+        
+        // Botões de fechar modal NUNCA recebem foco via TAB (evita diálogo indesejado)
+        document.querySelectorAll('.modal-close').forEach(btn => {
+            btn.setAttribute('tabindex', '-1');
+        });
+        
+        // Botões de abas NR e form-tabs NUNCA recebem foco via TAB
+        // (a navegação entre abas é controlada pelo código de Tab)
+        document.querySelectorAll('.nr-tab, .tab-btn').forEach(btn => {
+            btn.setAttribute('tabindex', '-1');
         });
         
         // Botões da toolbar (igual ao sistema desktop)
@@ -863,6 +1424,18 @@ class SysControleWeb {
         // Busca automática enquanto digita (com debounce)
         let timeoutBusca = null;
         const camposFiltro = ['filtroNome', 'filtroEmpresa', 'filtroFuncao'];
+
+        // Listeners para visibilidade de botões de emissão
+        const nrsBotoes = ['nr06', 'nr10', 'nr11', 'nr12', 'nr17', 'nr18', 'nr20', 'nr33', 'nr34', 'nr35', 'epi'];
+        nrsBotoes.forEach(nr => {
+            const input = document.getElementById(`${nr}_dataEmissao`);
+            if (input) {
+                // Múltiplos listeners para garantir visibilidade instantânea
+                ['input', 'change', 'keyup'].forEach(eventType => {
+                    input.addEventListener(eventType, () => this.atualizarVisibilidadeBotoesEmissao(nr));
+                });
+            }
+        });
         camposFiltro.forEach(campoId => {
             const campo = document.getElementById(campoId);
             if (campo) {
@@ -1185,7 +1758,64 @@ class SysControleWeb {
             }
             
             if (e.key === 'Escape') {
-                this.fecharModals();
+                const modals = [
+                    'modalZoom', 'modalComentarioCelula',
+                    'modalCfgNR10', 'modalCfgNR20', 'modalCfgNR06', 'modalCfgNR12', 'modalCfgNR11', 'modalCfgNR17', 'modalCfgNR18', 'modalCfgNR33', 'modalCfgNR34', 'modalCfgNR35', 'modalCfgEPI',
+                    'modalCertNR10', 'modalLPTNR10',
+                    'modalCertNR20', 'modalLPTNR20',
+                    'modalCertNR06', 'modalLPTNR06',
+                    'modalCertNR12', 'modalLPTNR12',
+                    'modalCertNR11', 'modalLPTNR11',
+                    'modalCertNR18', 'modalLPTNR18',
+                    'modalCertNR33', 'modalLPTNR33',
+                    'modalCertNR34', 'modalLPTNR34',
+                    'modalCertNR35', 'modalLPTNR35',
+                    'modalCertEPI', 'modalLPTEPI',
+                    'modalUsuarios', 'modalBackup', 'modalConfiguracoes', 'modalRastreamento',
+                    'modalControlePresenca', 'modalTabelaMes', 'modalHabilitarCursos',
+                    'modalForm'
+                ];
+                for (const id of modals) {
+                    const m = document.getElementById(id);
+                    const isVisible = m && (m.style.display === 'block' || m.style.display === 'flex' || (window.getComputedStyle(m).display !== 'none' && window.getComputedStyle(m).visibility !== 'hidden'));
+                    
+                    if (isVisible) {
+                        e.stopImmediatePropagation();
+                        e.stopPropagation();
+                        e.preventDefault();
+
+                        if (id === 'modalZoom') { m.style.display = 'none'; m.style.visibility = 'hidden'; if (m.remove) m.remove(); return; }
+                        if (id === 'modalComentarioCelula') { this.fecharComentarioCelula(); return; }
+
+                        if (id.startsWith('modalCfgNR')) {
+                            const nr = id.replace('modalCfgNR', '');
+                            const fnName = `fecharCfgNR${nr}`;
+                            if (this[fnName]) this[fnName]();
+                            else m.style.display = 'none';
+                            return;
+                        }
+                        
+                        if (id.startsWith('modalCertNR') || id.startsWith('modalLPTNR')) {
+                            const nr = id.replace('modalCertNR', '').replace('modalLPTNR', '');
+                            if (nr === '35') {
+                                id.includes('Cert') ? this.fecharCertNR35() : this.fecharLPTNR35();
+                                return;
+                            }
+                            const fnCert = `fecharCertNR${nr}`, fnLPT = `fecharLPTNR${nr}`;
+                            if (id.includes('Cert') && this[fnCert]) this[fnCert]();
+                            else if (id.includes('LPT') && this[fnLPT]) this[fnLPT]();
+                            else m.style.display = 'none';
+                            return;
+                        }
+
+                        if (id === 'modalHabilitarCursos') { this.fecharHabilitarCursos(); return; }
+                        if (id === 'modalTabelaMes' || id === 'modalControlePresenca') { m.style.display = 'none'; return; }
+                        if (id === 'modalForm' && this.fecharModals) { this.fecharModals(); return; }
+
+                        m.style.display = 'none';
+                        return;
+                    }
+                }
             }
         });
     }
@@ -1470,6 +2100,11 @@ class SysControleWeb {
             dataStatusAttrs += ` data-status-${cursoKey}="${statusCursos[curso].status}"`;
         });
         
+        // Verificar se possui certificado inválido
+        const possuiInvalido = this.verificarSePossuiCertificadoInvalido(item);
+        const dotInvalidoHTML = possuiInvalido ? 
+            '<span class="dot-invalido" title="Possui certificado(s) inválido(s) (Carga horária diária excedeu 8h)"></span>' : '';
+
         // Colunas fixas
         let cellsHTML = `
             <td class="col-expand" data-label="Sel">
@@ -1477,7 +2112,10 @@ class SysControleWeb {
             </td>
             <td class="col-foto" data-label="Foto">${this.renderFoto(item.fotoUrl, item.id)}</td>
             <td class="col-nome" data-label="Nome">
-                <div class="nome-principal">${item.Nome || ''}</div>
+                <div class="nome-wrapper" style="display: flex; align-items: center;">
+                    ${dotInvalidoHTML}
+                    <div class="nome-principal">${item.Nome || ''}</div>
+                </div>
                 <div class="cadastro-data">Cadastro: ${this.formatDateForDisplay(item.Cadastro) || '09/12/2025'}</div>
                 <div class="situacao-linha">
                     <span class="situacao-label">Situação:</span>
@@ -1499,8 +2137,8 @@ class SysControleWeb {
                     ` : '<span style="color: #999; font-size: 11px;">Sem permissão</span>'}
                 </div>
             </td>
-            <td class="col-empresa" data-label="Empresa">${item.Empresa || ''}</td>
-            <td class="col-funcao" data-label="Função">${item.Funcao || ''}</td>
+            <td class="col-empresa" data-label="Empresa" title="${item.Empresa || ''}">${item.Empresa || ''}</td>
+            <td class="col-funcao" data-label="Função" title="${item.Funcao || ''}">${item.Funcao || ''}</td>
         `;
         
         // Adicionar colunas de vencimento apenas se habilitadas (usando cache)
@@ -1541,7 +2179,8 @@ class SysControleWeb {
     renderFoto(fotoUrl, id) {
         if (fotoUrl && fotoUrl !== 'null' && fotoUrl !== '') {
             const timestamp = new Date().getTime();
-            const urlComTimestamp = `${fotoUrl}?t=${timestamp}`;
+            const separator = fotoUrl.includes('?') ? '&' : '?';
+            const urlComTimestamp = `${fotoUrl}${separator}t=${timestamp}`;
             return `<img src="${urlComTimestamp}" class="foto-thumbnail" alt="Foto" ondblclick="syscontrole.mostrarZoomFoto('${urlComTimestamp}')" style="cursor: pointer;" onerror="this.src='/FotoPadrao_Sys.png';">`;
         }
         
@@ -2099,6 +2738,9 @@ class SysControleWeb {
     
     // CRUD Operations (igual ao sistema desktop)
     async novoRegistro() {
+        // Resetar snapshot para desativar Dirty Check durante a preparação
+        this.formOriginalSnapshot = null;
+
         // Verificar permissão
         if (!this.verificarPermissao('cadastrar')) return;
         
@@ -2159,7 +2801,10 @@ class SysControleWeb {
                 nomeField.focus();
                 nomeField.select();
             }
-        }, 100);
+            // Capturar snapshot inicial para Novo Registro
+            this.formOriginalSnapshot = this.getFormSnapshot();
+            console.log('📸 Snapshot inicial capturado (Novo)');
+        }, 300);
     }
     
     // Função para limpar todos os campos de todas as abas
@@ -2275,6 +2920,10 @@ class SysControleWeb {
             fotoPlaceholderLarge.style.display = 'none';
             console.log('Placeholder grande da foto escondido');
         }
+
+        // Atualizar visibilidade dos botões de emissão (esconder todos)
+        const nrsParaOcultar = ['nr06', 'nr10', 'nr11', 'nr12', 'nr17', 'nr18', 'nr20', 'nr33', 'nr34', 'nr35', 'epi'];
+        nrsParaOcultar.forEach(nr => this.atualizarVisibilidadeBotoesEmissao(nr));
         
         console.log('Todos os campos foram limpos para novo registro');
     }
@@ -2320,6 +2969,9 @@ class SysControleWeb {
     }
     
     async editarRegistroById(id) {
+        // Resetar snapshot para desativar Dirty Check durante a preparação
+        this.formOriginalSnapshot = null;
+
         // Verificar permissão
         if (!this.verificarPermissao('editar')) return;
         
@@ -2371,6 +3023,12 @@ class SysControleWeb {
                 this.configurarBotaoSalvar(true);
                 // Garantir que a primeira aba habilitada está ativa após preencher
                 this.irParaPrimeiraAbaHabilitada();
+                
+                // Capturar snapshot inicial para Dirty Check
+                setTimeout(() => {
+                    this.formOriginalSnapshot = this.getFormSnapshot();
+                    console.log('📸 Snapshot inicial capturado');
+                }, 200);
             }, 100);
             
         } catch (error) {
@@ -2441,6 +3099,17 @@ class SysControleWeb {
             if (data.Nr06_Status) {
                 this.preencherCampo('nr06_status', data.Nr06_Status);
             }
+            if (data.Nr06_NumControle) {
+                this.preencherCampo('nr06_numControle', data.Nr06_NumControle);
+            }
+            if (data.Nr06_AnoControle) {
+                this.preencherCampo('nr06_anoControle', data.Nr06_AnoControle);
+            }
+            
+            const validade2Anos = document.getElementById('nr06_validade2anos');
+            if (validade2Anos) {
+                validade2Anos.checked = data.Nr06_Validade2Anos === 1;
+            }
             
             // Calcular campos da NR-06 se tem data de emissão
             if (data.Nr06_DataEmissao) {
@@ -2501,6 +3170,12 @@ class SysControleWeb {
             if (data.Nr12_Status) {
                 this.preencherCampo('nr12_status', data.Nr12_Status);
             }
+            if (data.Nr12_NumControle) {
+                this.preencherCampo('nr12_numControle', data.Nr12_NumControle);
+            }
+            if (data.Nr12_AnoControle) {
+                this.preencherCampo('nr12_anoControle', data.Nr12_AnoControle);
+            }
             if (data.Nr12_Ferramenta) {
                 this.preencherCampo('nr12_ferramenta', data.Nr12_Ferramenta);
             }
@@ -2524,6 +3199,12 @@ class SysControleWeb {
             if (data.Nr17_Status) {
                 this.preencherCampo('nr17_status', data.Nr17_Status);
             }
+            if (data.Nr17_NumControle) {
+                this.preencherCampo('nr17_numControle', data.Nr17_NumControle);
+            }
+            if (data.Nr17_AnoControle) {
+                this.preencherCampo('nr17_anoControle', data.Nr17_AnoControle);
+            }
             
             // Calcular campos da NR-17 se tem data de emissão
             if (data.Nr17_DataEmissao) {
@@ -2543,6 +3224,12 @@ class SysControleWeb {
             }
             if (data.Nr18_Status) {
                 this.preencherCampo('nr18_status', data.Nr18_Status);
+            }
+            if (data.Nr18_NumControle) {
+                this.preencherCampo('nr18_numControle', data.Nr18_NumControle);
+            }
+            if (data.Nr18_AnoControle) {
+                this.preencherCampo('nr18_anoControle', data.Nr18_AnoControle);
             }
             
             // Calcular campos da NR-18 se tem data de emissão
@@ -2564,6 +3251,12 @@ class SysControleWeb {
             if (data.Nr20_Status) {
                 this.preencherCampo('nr20_status', data.Nr20_Status);
             }
+            if (data.Nr20_NumControle) {
+                this.preencherCampo('nr20_numControle', data.Nr20_NumControle);
+            }
+            if (data.Nr20_AnoControle) {
+                this.preencherCampo('nr20_anoControle', data.Nr20_AnoControle);
+            }
             
             // Calcular campos da NR-20 se tem data de emissão
             if (data.Nr20_DataEmissao) {
@@ -2583,6 +3276,12 @@ class SysControleWeb {
             }
             if (data.Nr33_Status) {
                 this.preencherCampo('nr33_status', data.Nr33_Status);
+            }
+            if (data.Nr33_NumControle) {
+                this.preencherCampo('nr33_numControle', data.Nr33_NumControle);
+            }
+            if (data.Nr33_AnoControle) {
+                this.preencherCampo('nr33_anoControle', data.Nr33_AnoControle);
             }
             
             // Calcular campos da NR-33 se tem data de emissão
@@ -2624,6 +3323,12 @@ class SysControleWeb {
             if (data.Nr35_Status) {
                 this.preencherCampo('nr35_status', data.Nr35_Status);
             }
+            if (data.Nr35_NumControle) {
+                this.preencherCampo('nr35_numControle', data.Nr35_NumControle);
+            }
+            if (data.Nr35_AnoControle) {
+                this.preencherCampo('nr35_anoControle', data.Nr35_AnoControle);
+            }
             
             // Calcular campos da NR-35 se tem data de emissão
             if (data.Nr35_DataEmissao) {
@@ -2645,6 +3350,11 @@ class SysControleWeb {
                 this.preencherCampo('epi_status', data.EpiStatus);
             }
             
+            const validade8Meses = document.getElementById('epi_validade8meses');
+            if (validade8Meses) {
+                validade8Meses.checked = data.Epi_Validade8Meses === 1;
+            }
+            
             // Calcular campos da EPI se tem data de emissão
             if (data.Epi_DataEmissao) {
                 setTimeout(() => this.calcularEPI(), 100);
@@ -2661,6 +3371,10 @@ class SysControleWeb {
             
             // Preencher campo Ambientação (radio buttons)
             this.preencherAmbientacao(data.Ambientacao);
+            
+            // Preencher checkbox Ignorar Invalidez
+            const cbIgnorar = document.getElementById('ignorarInvalidez');
+            if (cbIgnorar) cbIgnorar.checked = (data.IgnorarInvalidez === 'S');
             
             // Preencher anotações do banco de dados
             const anotacoes = document.getElementById('anotacoes');
@@ -2693,6 +3407,10 @@ class SysControleWeb {
             
             // Calcular dias após preencher
             setTimeout(() => this.calcularDiasEStatus(), 100);
+
+            // Atualizar visibilidade dos botões de emissão em todas as abas
+            const nrsParaVisibilidade = ['nr06', 'nr10', 'nr11', 'nr12', 'nr17', 'nr18', 'nr20', 'nr33', 'nr34', 'nr35'];
+            nrsParaVisibilidade.forEach(nr => this.atualizarVisibilidadeBotoesEmissao(nr));
             
             console.log('Formulário preenchido com sucesso');
             
@@ -2705,10 +3423,52 @@ class SysControleWeb {
     preencherCampo(id, valor, isSelect = false) {
         const campo = document.getElementById(id);
         if (campo && valor !== undefined && valor !== null) {
-            // Todos os campos são inputs ou selects, não precisa de lógica especial
-            campo.value = valor;
-            console.log(`Campo ${id} preenchido:`, valor);
+            // Aplicar correção de caracteres antes de preencher
+            const valorCorrigido = this._corrigirTexto(valor);
+            
+            campo.value = valorCorrigido;
+            console.log(`Campo ${id} preenchido (corrigido):`, valorCorrigido);
         }
+    }
+
+    // Centralizar correção de caracteres (UTF-8 / Windows-1252)
+    _corrigirTexto(texto) {
+        if (typeof texto !== 'string') return texto;
+        
+        // Mapa de correções comuns para português (Brouken characters from legacy systems)
+        // Adicionando os casos mais comuns de acentuação "quebrada"
+        let resultado = texto;
+        
+        const correcoes = [
+            { error: /[\uFFFD]/g,  fix: 'A' }, // Tentar mapear o diamond genérico para algo neutro se for MQUINA
+            { error: /\ufffd/g,     fix: 'A' },
+            // Casos específicos onde o caractere é cortado ou substituído por 
+            { error: /M\ufffdQUINA/gi,   fix: 'MÁQUINA' },
+            { error: /JO\ufffdO/gi,      fix: 'JOÃO' },
+            { error: /CONCEI\ufffd\ufffdO/gi, fix: 'CONCEIÇÃO' },
+            { error: /ATEN\ufffd\ufffdO/gi,   fix: 'ATENÇÃO' },
+            { error: /MANUTEN\ufffd\ufffdO/gi, fix: 'MANUTENÇÃO' },
+            { error: /DURA\ufffd\ufffdO/gi,   fix: 'DURAÇÃO' },
+            { error: /PROTE\ufffd\ufffdO/gi,   fix: 'PROTEÇÃO' },
+            { error: /CONSERVA\ufffd\ufffdO/gi, fix: 'CONSERVAÇÃO' },
+            { error: /INSPE\ufffd\ufffdO/gi,    fix: 'INSPEÇÃO' },
+            { error: /SUBSTITUI\ufffd\ufffdO/gi, fix: 'SUBSTITUIÇÃO' },
+            { error: /PRODU\ufffd\ufffdO/gi,    fix: 'PRODUÇÃO' },
+            { error: /RELA\ufffd\ufffdO/gi,     fix: 'RELAÇÃO' },
+            { error: /SITUA\ufffd\ufffdO/gi,    fix: 'SITUAÇÃO' },
+            { error: /A\ufffd\ufffdO/gi,        fix: 'AÇÃO' },
+            { error: /S\ufffdO/gi,           fix: 'SÃO' },
+            { error: /S\ufffd/gi,            fix: 'SÃO' }, // Caso comum de "SÃ"
+            { error: /N\ufffdO/gi,           fix: 'NÃO' },
+            { error: /Ã\ufffd/g,           fix: 'Ã' },
+            { error: /Õ\ufffd/g,           fix: 'Õ' }
+        ];
+
+        correcoes.forEach(c => {
+            resultado = resultado.replace(c.error, c.fix);
+        });
+
+        return resultado;
     }
     
     // Preencher campo de ambientação (radio buttons)
@@ -2746,6 +3506,37 @@ class SysControleWeb {
             }
         }
     }
+
+    /**
+     * Atualiza a visibilidade dos botões de Certificado, Lista de Presença e Configuração
+     * baseando-se no preenchimento do campo Data de Emissão.
+     */
+    atualizarVisibilidadeBotoesEmissao(nrPrefix) {
+        // Mapeamento especial para campos que não seguem o prefixo padrão se houver
+        const mapping = {
+            'aso': 'dataEmissao',
+            'epi': 'epi_dataEmissao'
+        };
+        const idCampo = mapping[nrPrefix] || `${nrPrefix}_dataEmissao`;
+        const inputDate = document.getElementById(idCampo);
+        if (!inputDate) return;
+
+        // Se tiver valor e o formato for minimamente válido (dd/mm/yy ou dd/mm/aaaa)
+        // Relaxamos de 10 para 8 caracteres para suportar anos com 2 dígitos
+        const hasDate = inputDate.value && inputDate.value.trim().length >= 8;
+        
+        // Localizar container da aba
+        const containerId = nrPrefix === 'aso' ? 'content-aso' : `content-${nrPrefix}`;
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        // Localizar botões de Certificado, LPT e Configuração dentro desta aba específica
+        const botoes = container.querySelectorAll('button[onclick*="abrirCert"], button[onclick*="abrirLPT"], button[onclick*="abrirCfg"]');
+        
+        botoes.forEach(btn => {
+            btn.style.display = hasDate ? 'inline-block' : 'none';
+        });
+    }
     
     // Carregar foto no formulário
     carregarFotoFormulario(data) {
@@ -2758,7 +3549,9 @@ class SysControleWeb {
         if (fotoPreview && fotoPlaceholder) {
             if (data.Foto && data.id) {
                 // Usar o endpoint de foto
-                const fotoUrl = `/api/foto/${data.id}`;
+                const tenantId = this.currentUser?.tenant_id || '';
+                const tenantParam = tenantId ? `?tenant_id=${tenantId}` : '';
+                const fotoUrl = `/api/foto/${data.id}${tenantParam}`;
                 fotoPreview.src = fotoUrl;
                 fotoPreview.style.display = 'block';
                 fotoPlaceholder.style.display = 'none';
@@ -2987,6 +3780,40 @@ class SysControleWeb {
             }
             // ============ FIM VALIDAÇÃO DINÂMICA ============
             
+            // ============ VALIDAÇÃO DE CARGA HORÁRIA DIÁRIA (MÁX 8H) ============
+            // Bloqueio removido conforme solicitação do usuário. 
+            // A marca d'água "CERTIFICADO INVÁLIDO" continuará sendo exibida na visualização do certificado.
+            const datasTrabalho = {};
+            const nrsParaVerificar = [
+                { id: 'nr06_dataEmissao', key: 'nr06', label: 'NR-06' },
+                { id: 'nr10_dataEmissao', key: 'nr10', label: 'NR-10' },
+                { id: 'nr11_dataEmissao', key: 'nr11', label: 'NR-11' },
+                { id: 'nr12_dataEmissao', key: 'nr12', label: 'NR-12' },
+                { id: 'nr17_dataEmissao', key: 'nr17', label: 'NR-17' },
+                { id: 'nr18_dataEmissao', key: 'nr18', label: 'NR-18' },
+                { id: 'nr20_dataEmissao', key: 'nr20', label: 'NR-20' },
+                { id: 'nr33_dataEmissao', key: 'nr33', label: 'NR-33' },
+                { id: 'nr34_dataEmissao', key: 'nr34', label: 'NR-34' },
+                { id: 'nr35_dataEmissao', key: 'nr35', label: 'NR-35' },
+                { id: 'epi_dataEmissao', key: 'epi', label: 'EPI' }
+            ];
+
+            nrsParaVerificar.forEach(item => {
+                const dataVal = document.getElementById(item.id)?.value || '';
+                if (dataVal.trim() !== '') {
+                    if (!datasTrabalho[dataVal]) datasTrabalho[dataVal] = { total: 0, cursos: [] };
+                    const horas = this.NR_DURATIONS[item.key] || 0;
+                    datasTrabalho[dataVal].total += horas;
+                }
+            });
+
+            for (const data in datasTrabalho) {
+                if (datasTrabalho[data].total > 8) {
+                    console.warn(`⚠️ Limite de carga horária excedido para a data ${data} (${datasTrabalho[data].total}h). O certificado será exibido como INVÁLIDO.`);
+                }
+            }
+            // ============ FIM VALIDAÇÃO CARGA HORÁRIA ============
+            
             // Preparar dados em JSON
             const dados = {
                 nome: document.getElementById('nome')?.value || '',
@@ -2999,9 +3826,11 @@ class SysControleWeb {
                 anotacoes: document.getElementById('anotacoes')?.value || '',
                 situacao: isEdit ? (document.querySelector('.btn-status.ativo') ? 'N' : 'S') : 'N',
                 ambientacao: document.querySelector('input[name="ambientacao"]:checked')?.value || 'N',
+                ignorarInvalidez: document.getElementById('ignorarInvalidez')?.checked ? 'S' : 'N',
                 nr06_dataEmissao: document.getElementById('nr06_dataEmissao')?.value || '',
                 nr06_vencimento: document.getElementById('nr06_vencimento')?.value || '',
                 nr06_status: document.getElementById('nr06_status')?.value || '',
+                nr06_validade2anos: document.getElementById('nr06_validade2anos')?.checked ? 1 : 0,
                 nr10_dataEmissao: document.getElementById('nr10_dataEmissao')?.value || '',
                 nr10_vencimento: document.getElementById('nr10_vencimento')?.value || '',
                 nr10_status: document.getElementById('nr10_status')?.value || '',
@@ -3011,7 +3840,6 @@ class SysControleWeb {
                 nr12_dataEmissao: document.getElementById('nr12_dataEmissao')?.value || '',
                 nr12_vencimento: document.getElementById('nr12_vencimento')?.value || '',
                 nr12_status: document.getElementById('nr12_status')?.value || '',
-                nr12_ferramenta: document.getElementById('nr12_ferramenta')?.value || '',
                 nr12_ferramenta: document.getElementById('nr12_ferramenta')?.value || '',
                 nr17_dataEmissao: document.getElementById('nr17_dataEmissao')?.value || '',
                 nr17_vencimento: document.getElementById('nr17_vencimento')?.value || '',
@@ -3034,6 +3862,24 @@ class SysControleWeb {
                 epi_dataEmissao: document.getElementById('epi_dataEmissao')?.value || '',
                 epi_vencimento: document.getElementById('epi_vencimento')?.value || '',
                 epi_status: document.getElementById('epi_status')?.value || '',
+                epi_validade8meses: document.getElementById('epi_validade8meses')?.checked ? 1 : 0,
+                
+                // Incluir campos de controle se estiverem no cache de edição (prevenir wipeout)
+                nr06_numControle: this.currentEditingData?.Nr06_NumControle,
+                nr06_anoControle: this.currentEditingData?.Nr06_AnoControle,
+                nr12_numControle: this.currentEditingData?.Nr12_NumControle,
+                nr12_anoControle: this.currentEditingData?.Nr12_AnoControle,
+                nr17_numControle: this.currentEditingData?.Nr17_NumControle,
+                nr17_anoControle: this.currentEditingData?.Nr17_AnoControle,
+                nr18_numControle: this.currentEditingData?.Nr18_NumControle,
+                nr18_anoControle: this.currentEditingData?.Nr18_AnoControle,
+                nr20_numControle: this.currentEditingData?.Nr20_NumControle,
+                nr20_anoControle: this.currentEditingData?.Nr20_AnoControle,
+                nr33_numControle: this.currentEditingData?.Nr33_NumControle,
+                nr33_anoControle: this.currentEditingData?.Nr33_AnoControle,
+                nr35_numControle: this.currentEditingData?.Nr35_NumControle,
+                nr35_anoControle: this.currentEditingData?.Nr35_AnoControle,
+                
                 removerFoto: this.fotoRemovida // Flag para remover foto
             };
             
@@ -3111,6 +3957,10 @@ class SysControleWeb {
             if (response.ok) {
                 this.showToast(data.message || 'Registro salvo com sucesso!', 'success');
                 
+                // Atualizar dados locais e snapshot para evitar disparo do Dirty Check ao fechar
+                this.currentEditingData = this.getDadosAtuaisFormulario();
+                this.formOriginalSnapshot = this.getFormSnapshot();
+                
                 // Limpar input de foto após salvar com sucesso
                 const fotoInput = document.getElementById('foto');
                 if (fotoInput) {
@@ -3121,9 +3971,11 @@ class SysControleWeb {
                 // Forçar atualização IMEDIATA da foto com cache-busting (antes de recarregar tudo)
                 if (isEdit) {
                     const timestamp = new Date().getTime();
+                    const tenantId = this.currentUser?.tenant_id || '';
+                    const tenantParam = tenantId ? `&tenant_id=${tenantId}` : '';
                     const fotoImg = document.querySelector(`tr[data-id="${this.editingId}"] img.foto-thumbnail`);
                     if (fotoImg) {
-                        fotoImg.src = `/api/foto/${this.editingId}?t=${timestamp}`;
+                        fotoImg.src = `/api/foto/${this.editingId}?t=${timestamp}${tenantParam}`;
                         console.log('🖼️ Foto atualizada IMEDIATAMENTE com cache-busting');
                     }
                 }
@@ -3148,6 +4000,10 @@ class SysControleWeb {
                     if (data.duplicateType === 'cpf') {
                         this.mostrarImagemDuplicata('/CPF-Duplicado.jpg', data.error);
                         console.warn('⚠️ Tentativa de cadastro com CPF duplicado bloqueada:', data);
+                    } else if (data.duplicateType === 'controle_nr') {
+                        // Usar imagem genérica de duplicidade para número de controle
+                        this.mostrarImagemDuplicata('/Cadastro-ja-Existe.jpg', data.error);
+                        console.warn('⚠️ Tentativa de duplicidade de número de controle:', data);
                     } else {
                         this.mostrarImagemDuplicata('/Cadastro-ja-Existe.jpg', data.error);
                         console.warn('⚠️ Tentativa de cadastro duplicado bloqueada:', data);
@@ -3155,12 +4011,12 @@ class SysControleWeb {
                 } else {
                     const errorMsg = data.error || 'Erro ao salvar registro';
                     console.error('Mensagem de erro:', errorMsg);
-                    this.showToast(errorMsg, 'error');
+                    this.showToast('Erro do servidor: ' + errorMsg, 'error');
                 }
             }
         } catch (error) {
             console.error('Erro ao salvar registro:', error);
-            this.showToast('Erro de conexão com o servidor', 'error');
+            this.showToast('Erro de conexão (frontend): ' + error.message, 'error');
         } finally {
             this.salvandoRegistro = false;
             
@@ -3197,7 +4053,7 @@ class SysControleWeb {
     }
     
     // Controle das abas NR
-    switchNRTab(nrType) {
+    switchNRTab(nrType, force = false) {
         // Verificar se a aba solicitada está habilitada (visível)
         const tabElement = document.querySelector(`.nr-tab[data-nr="${nrType}"]`);
         if (tabElement && tabElement.style.display === 'none') {
@@ -3490,6 +4346,8 @@ class SysControleWeb {
     // Configurar eventos da NR-06 (vencimento 1 ano)
     setupNR06Events() {
         const nr06DataEmissao = document.getElementById('nr06_dataEmissao');
+        const nr06Validade2Anos = document.getElementById('nr06_validade2anos');
+
         if (nr06DataEmissao) {
             nr06DataEmissao.addEventListener('input', (e) => {
                 this.formatarDataEmissao(e);
@@ -3498,6 +4356,10 @@ class SysControleWeb {
                     const valor = e.target.value;
                     if (valor.length >= 10) { // dd/mm/aaaa
                         this.calcularNR06();
+                        // Sincronizar com o certificado se o modal estiver aberto
+                        if (typeof this.renderCertNR06 === 'function' && document.getElementById('modalCertNR06').style.display === 'block') {
+                            this.renderCertNR06();
+                        }
                     }
                 }, 100);
             });
@@ -3517,6 +4379,12 @@ class SysControleWeb {
             });
             // Selecionar tudo ao duplo clique
             nr06DataEmissao.addEventListener('dblclick', (e) => this.selecionarTodoTexto(e));
+        }
+
+        if (nr06Validade2Anos) {
+            nr06Validade2Anos.addEventListener('change', () => {
+                this.calcularNR06();
+            });
         }
     }
     
@@ -3846,6 +4714,13 @@ class SysControleWeb {
                 setTimeout(() => this.calcularEPI(), 100);
             });
         }
+
+        const epiValidade8Meses = document.getElementById('epi_validade8meses');
+        if (epiValidade8Meses) {
+            epiValidade8Meses.addEventListener('change', () => {
+                this.calcularEPI();
+            });
+        }
     }
     
     // Configurar eventos para todas as outras NRs
@@ -3892,7 +4767,7 @@ class SysControleWeb {
         const celularField = document.getElementById('fornecedor_celular');
         if (celularField) {
             celularField.addEventListener('input', (e) => {
-                this.formatarTelefone(e.target);
+                this.formatarCelular(e.target);
             });
         }
         
@@ -4845,15 +5720,15 @@ class SysControleWeb {
         const nr10Placeholder = document.getElementById('nr10_fotoPlaceholder');
         
         if (asoNome && nr10Nome) {
-            nr10Nome.value = asoNome.options[asoNome.selectedIndex]?.text || asoNome.value || '';
+            nr10Nome.value = asoNome.value || '';
         }
         
         if (asoEmpresa && nr10Empresa) {
-            nr10Empresa.value = asoEmpresa.options[asoEmpresa.selectedIndex]?.text || asoEmpresa.value || '';
+            nr10Empresa.value = asoEmpresa.value || '';
         }
         
         if (asoFuncao && nr10Funcao) {
-            nr10Funcao.value = asoFuncao.options[asoFuncao.selectedIndex]?.text || asoFuncao.value || '';
+            nr10Funcao.value = asoFuncao.value || '';
         }
         
         // Copiar foto - verificar se estamos editando um registro
@@ -4894,15 +5769,15 @@ class SysControleWeb {
         const nr11Funcao = document.getElementById('nr11_funcao');
         
         if (asoNome && nr11Nome) {
-            nr11Nome.value = asoNome.options[asoNome.selectedIndex]?.text || asoNome.value || '';
+            nr11Nome.value = asoNome.value || '';
         }
         
         if (asoEmpresa && nr11Empresa) {
-            nr11Empresa.value = asoEmpresa.options[asoEmpresa.selectedIndex]?.text || asoEmpresa.value || '';
+            nr11Empresa.value = asoEmpresa.value || '';
         }
         
         if (asoFuncao && nr11Funcao) {
-            nr11Funcao.value = asoFuncao.options[asoFuncao.selectedIndex]?.text || asoFuncao.value || '';
+            nr11Funcao.value = asoFuncao.value || '';
         }
         
         // Reconfigurar botão conforme o contexto (novo ou edição)
@@ -4922,15 +5797,15 @@ class SysControleWeb {
         const nr12Funcao = document.getElementById('nr12_funcao');
         
         if (asoNome && nr12Nome) {
-            nr12Nome.value = asoNome.options[asoNome.selectedIndex]?.text || asoNome.value || '';
+            nr12Nome.value = asoNome.value || '';
         }
         
         if (asoEmpresa && nr12Empresa) {
-            nr12Empresa.value = asoEmpresa.options[asoEmpresa.selectedIndex]?.text || asoEmpresa.value || '';
+            nr12Empresa.value = asoEmpresa.value || '';
         }
         
         if (asoFuncao && nr12Funcao) {
-            nr12Funcao.value = asoFuncao.options[asoFuncao.selectedIndex]?.text || asoFuncao.value || '';
+            nr12Funcao.value = asoFuncao.value || '';
         }
         
         // Reconfigurar botão conforme o contexto (novo ou edição)
@@ -4949,15 +5824,15 @@ class SysControleWeb {
         const nr17Funcao = document.getElementById('nr17_funcao');
         
         if (asoNome && nr17Nome) {
-            nr17Nome.value = asoNome.options[asoNome.selectedIndex]?.text || asoNome.value || '';
+            nr17Nome.value = asoNome.value || '';
         }
         
         if (asoEmpresa && nr17Empresa) {
-            nr17Empresa.value = asoEmpresa.options[asoEmpresa.selectedIndex]?.text || asoEmpresa.value || '';
+            nr17Empresa.value = asoEmpresa.value || '';
         }
         
         if (asoFuncao && nr17Funcao) {
-            nr17Funcao.value = asoFuncao.options[asoFuncao.selectedIndex]?.text || asoFuncao.value || '';
+            nr17Funcao.value = asoFuncao.value || '';
         }
         
         // Reconfigurar botão conforme o contexto (novo ou edição)
@@ -4976,15 +5851,15 @@ class SysControleWeb {
         const nr18Funcao = document.getElementById('nr18_funcao');
         
         if (asoNome && nr18Nome) {
-            nr18Nome.value = asoNome.options[asoNome.selectedIndex]?.text || asoNome.value || '';
+            nr18Nome.value = asoNome.value || '';
         }
         
         if (asoEmpresa && nr18Empresa) {
-            nr18Empresa.value = asoEmpresa.options[asoEmpresa.selectedIndex]?.text || asoEmpresa.value || '';
+            nr18Empresa.value = asoEmpresa.value || '';
         }
         
         if (asoFuncao && nr18Funcao) {
-            nr18Funcao.value = asoFuncao.options[asoFuncao.selectedIndex]?.text || asoFuncao.value || '';
+            nr18Funcao.value = asoFuncao.value || '';
         }
         
         // Reconfigurar botão conforme o contexto (novo ou edição)
@@ -5003,15 +5878,15 @@ class SysControleWeb {
         const nr33Funcao = document.getElementById('nr33_funcao');
         
         if (asoNome && nr33Nome) {
-            nr33Nome.value = asoNome.options[asoNome.selectedIndex]?.text || asoNome.value || '';
+            nr33Nome.value = asoNome.value || '';
         }
         
         if (asoEmpresa && nr33Empresa) {
-            nr33Empresa.value = asoEmpresa.options[asoEmpresa.selectedIndex]?.text || asoEmpresa.value || '';
+            nr33Empresa.value = asoEmpresa.value || '';
         }
         
         if (asoFuncao && nr33Funcao) {
-            nr33Funcao.value = asoFuncao.options[asoFuncao.selectedIndex]?.text || asoFuncao.value || '';
+            nr33Funcao.value = asoFuncao.value || '';
         }
         
         // Reconfigurar botão conforme o contexto (novo ou edição)
@@ -5030,15 +5905,15 @@ class SysControleWeb {
         const nr35Funcao = document.getElementById('nr35_funcao');
         
         if (asoNome && nr35Nome) {
-            nr35Nome.value = asoNome.options[asoNome.selectedIndex]?.text || asoNome.value || '';
+            nr35Nome.value = asoNome.value || '';
         }
         
         if (asoEmpresa && nr35Empresa) {
-            nr35Empresa.value = asoEmpresa.options[asoEmpresa.selectedIndex]?.text || asoEmpresa.value || '';
+            nr35Empresa.value = asoEmpresa.value || '';
         }
         
         if (asoFuncao && nr35Funcao) {
-            nr35Funcao.value = asoFuncao.options[asoFuncao.selectedIndex]?.text || asoFuncao.value || '';
+            nr35Funcao.value = asoFuncao.value || '';
         }
         
         // Reconfigurar botão conforme o contexto (novo ou edição)
@@ -5057,13 +5932,13 @@ class SysControleWeb {
         const epiFuncao = document.getElementById('epi_funcao');
         
         if (asoNome && epiNome) {
-            epiNome.value = asoNome.options[asoNome.selectedIndex]?.text || '';
+            epiNome.value = asoNome.value || '';
         }
         if (asoEmpresa && epiEmpresa) {
-            epiEmpresa.value = asoEmpresa.options[asoEmpresa.selectedIndex]?.text || '';
+            epiEmpresa.value = asoEmpresa.value || '';
         }
         if (asoFuncao && epiFuncao) {
-            epiFuncao.value = asoFuncao.options[asoFuncao.selectedIndex]?.text || '';
+            epiFuncao.value = asoFuncao.value || '';
         }
         
         // Reconfigurar botão conforme o contexto (novo ou edição)
@@ -5128,13 +6003,18 @@ class SysControleWeb {
         
         const emissaoValue = dataEmissao.value;
         
-        if (!emissaoValue || emissaoValue.length < 10) {
+        if (!emissaoValue || emissaoValue.length < 8) {
             return;
         }
         
         try {
             // Converter data de emissão
-            const [dia, mes, ano] = emissaoValue.split('/');
+            const parts = emissaoValue.split('/');
+            if (parts.length !== 3) return;
+            
+            let [dia, mes, ano] = parts;
+            if (ano.length === 2) ano = '20' + ano;
+            
             const dataEmissaoDate = new Date(ano, mes - 1, dia);
             
             if (isNaN(dataEmissaoDate.getTime())) {
@@ -5148,8 +6028,6 @@ class SysControleWeb {
             // Preencher campo vencimento
             const vencimentoFormatado = vencimentoDate.toISOString().split('T')[0];
             vencimento.value = vencimentoFormatado;
-            vencimento.dispatchEvent(new Event('change', { bubbles: true }));
-            vencimento.dispatchEvent(new Event('input', { bubbles: true }));
             
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
@@ -5163,10 +6041,7 @@ class SysControleWeb {
             
             // Preencher campos
             diasCorridos.value = diasCorridosCalc >= 0 ? diasCorridosCalc : 0;
-            diasCorridos.dispatchEvent(new Event('change', { bubbles: true }));
-            
             diasVencer.value = diasVencerCalc;
-            diasVencer.dispatchEvent(new Event('change', { bubbles: true }));
             
             // Calcular status
             let novoStatus = '';
@@ -5179,11 +6054,11 @@ class SysControleWeb {
             }
             
             status.value = novoStatus;
-            status.dispatchEvent(new Event('change', { bubbles: true }));
             this.atualizarCorStatus(status, novoStatus);
-            
         } catch (error) {
             console.error('Erro no cálculo NR-10:', error);
+        } finally {
+            this.atualizarVisibilidadeBotoesEmissao('nr10');
         }
     }
     
@@ -5261,13 +6136,18 @@ class SysControleWeb {
         
         const emissaoValue = dataEmissao.value;
         
-        if (!emissaoValue || emissaoValue.length < 10) {
+        if (!emissaoValue || emissaoValue.length < 8) {
             return;
         }
         
         try {
             // Converter data de emissão
-            const [dia, mes, ano] = emissaoValue.split('/');
+            const parts = emissaoValue.split('/');
+            if (parts.length !== 3) return;
+            
+            let [dia, mes, ano] = parts;
+            if (ano.length === 2) ano = '20' + ano;
+            
             const dataEmissaoDate = new Date(ano, mes - 1, dia);
             
             if (isNaN(dataEmissaoDate.getTime())) {
@@ -5281,8 +6161,6 @@ class SysControleWeb {
             // Preencher campo vencimento
             const vencimentoFormatado = vencimentoDate.toISOString().split('T')[0];
             vencimento.value = vencimentoFormatado;
-            vencimento.dispatchEvent(new Event('change', { bubbles: true }));
-            vencimento.dispatchEvent(new Event('input', { bubbles: true }));
             
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
@@ -5296,10 +6174,7 @@ class SysControleWeb {
             
             // Preencher campos
             diasCorridos.value = diasCorridosCalc >= 0 ? diasCorridosCalc : 0;
-            diasCorridos.dispatchEvent(new Event('change', { bubbles: true }));
-            
             diasVencer.value = diasVencerCalc;
-            diasVencer.dispatchEvent(new Event('change', { bubbles: true }));
             
             // Calcular status
             let novoStatus = '';
@@ -5312,11 +6187,11 @@ class SysControleWeb {
             }
             
             status.value = novoStatus;
-            status.dispatchEvent(new Event('change', { bubbles: true }));
             this.atualizarCorStatus(status, novoStatus);
-            
         } catch (error) {
             console.error('Erro no cálculo NR-11:', error);
+        } finally {
+            this.atualizarVisibilidadeBotoesEmissao('nr11');
         }
     }
     
@@ -5334,64 +6209,57 @@ class SysControleWeb {
         
         const emissaoValue = dataEmissao.value;
         
-        if (!emissaoValue || emissaoValue.length < 6) {
+        if (!emissaoValue || emissaoValue.length < 8) {
+            if (typeof vencimento !== 'undefined' && vencimento) vencimento.value = '';
+            if (typeof diasCorridos !== 'undefined' && diasCorridos) diasCorridos.value = '';
+            if (typeof diasVencer !== 'undefined' && diasVencer) diasVencer.value = '';
+            if (typeof status !== 'undefined' && status) status.value = '';
+            this.atualizarVisibilidadeBotoesEmissao('nr12');
             return;
         }
         
         try {
             // Converter data de emissão
             const parts = emissaoValue.split('/');
-            if (parts.length !== 3) return;
-            
-            let [dia, mes, ano] = parts;
-            
-            // Se ano tem apenas 2 dígitos, assumir 20xx
-            if (ano.length === 2) {
-                ano = '20' + ano;
-            }
-            
-            const dataEmissaoDate = new Date(ano, mes - 1, dia);
-            
-            if (isNaN(dataEmissaoDate.getTime())) {
+            if (parts.length !== 3) {
+                this.atualizarVisibilidadeBotoesEmissao('nr12');
                 return;
             }
             
-            // Calcular vencimento (2 anos após emissão)
+            let [dia, mes, ano] = parts;
+            if (ano.length === 2) ano = '20' + ano;
+            
+            const dataEmissaoDate = new Date(ano, mes - 1, dia);
+            if (isNaN(dataEmissaoDate.getTime())) {
+                this.atualizarVisibilidadeBotoesEmissao('nr12');
+                return;
+            }
+            
+            // ... rest of logic
             const vencimentoDate = new Date(dataEmissaoDate);
             vencimentoDate.setFullYear(vencimentoDate.getFullYear() + 2);
-            
-            // Preencher campo vencimento
             vencimento.value = vencimentoDate.toISOString().split('T')[0];
             
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
-            
-            // Calcular dias
             const diffEmissaoHoje = hoje.getTime() - dataEmissaoDate.getTime();
             const diasCorridosCalc = Math.floor(diffEmissaoHoje / (1000 * 60 * 60 * 24));
-            
             const diffHojeVencimento = vencimentoDate.getTime() - hoje.getTime();
             const diasVencerCalc = Math.ceil(diffHojeVencimento / (1000 * 60 * 60 * 24));
-            
-            // Preencher campos
             diasCorridos.value = diasCorridosCalc >= 0 ? diasCorridosCalc : 0;
             diasVencer.value = diasVencerCalc;
             
-            // Calcular status
             let novoStatus = '';
-            if (diasVencerCalc < 0) {
-                novoStatus = 'Vencido';
-            } else if (diasVencerCalc <= 30) {
-                novoStatus = 'Renovar';
-            } else {
-                novoStatus = 'OK';
-            }
+            if (diasVencerCalc < 0) novoStatus = 'Vencido';
+            else if (diasVencerCalc <= 30) novoStatus = 'Renovar';
+            else novoStatus = 'OK';
             
             status.value = novoStatus;
             this.atualizarCorStatus(status, novoStatus);
-            
         } catch (error) {
             console.error('Erro no cálculo NR-12:', error);
+        } finally {
+            this.atualizarVisibilidadeBotoesEmissao('nr12');
         }
     }
     
@@ -5409,64 +6277,57 @@ class SysControleWeb {
         
         const emissaoValue = dataEmissao.value;
         
-        if (!emissaoValue || emissaoValue.length < 6) {
+        if (!emissaoValue || emissaoValue.length < 8) {
+            if (typeof vencimento !== 'undefined' && vencimento) vencimento.value = '';
+            if (typeof diasCorridos !== 'undefined' && diasCorridos) diasCorridos.value = '';
+            if (typeof diasVencer !== 'undefined' && diasVencer) diasVencer.value = '';
+            if (typeof status !== 'undefined' && status) status.value = '';
+            this.atualizarVisibilidadeBotoesEmissao('nr17');
             return;
         }
         
         try {
             // Converter data de emissão
             const parts = emissaoValue.split('/');
-            if (parts.length !== 3) return;
-            
-            let [dia, mes, ano] = parts;
-            
-            // Se ano tem apenas 2 dígitos, assumir 20xx
-            if (ano.length === 2) {
-                ano = '20' + ano;
-            }
-            
-            const dataEmissaoDate = new Date(ano, mes - 1, dia);
-            
-            if (isNaN(dataEmissaoDate.getTime())) {
+            if (parts.length !== 3) {
+                this.atualizarVisibilidadeBotoesEmissao('nr17');
                 return;
             }
             
-            // Calcular vencimento (2 anos após emissão)
+            let [dia, mes, ano] = parts;
+            if (ano.length === 2) ano = '20' + ano;
+            
+            const dataEmissaoDate = new Date(ano, mes - 1, dia);
+            if (isNaN(dataEmissaoDate.getTime())) {
+                this.atualizarVisibilidadeBotoesEmissao('nr17');
+                return;
+            }
+            
+            // ... rest of logic
             const vencimentoDate = new Date(dataEmissaoDate);
             vencimentoDate.setFullYear(vencimentoDate.getFullYear() + 2);
-            
-            // Preencher campo vencimento
             vencimento.value = vencimentoDate.toISOString().split('T')[0];
             
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
-            
-            // Calcular dias
             const diffEmissaoHoje = hoje.getTime() - dataEmissaoDate.getTime();
             const diasCorridosCalc = Math.floor(diffEmissaoHoje / (1000 * 60 * 60 * 24));
-            
             const diffHojeVencimento = vencimentoDate.getTime() - hoje.getTime();
             const diasVencerCalc = Math.ceil(diffHojeVencimento / (1000 * 60 * 60 * 24));
-            
-            // Preencher campos
             diasCorridos.value = diasCorridosCalc >= 0 ? diasCorridosCalc : 0;
             diasVencer.value = diasVencerCalc;
             
-            // Calcular status
             let novoStatus = '';
-            if (diasVencerCalc < 0) {
-                novoStatus = 'Vencido';
-            } else if (diasVencerCalc <= 30) {
-                novoStatus = 'Renovar';
-            } else {
-                novoStatus = 'OK';
-            }
+            if (diasVencerCalc < 0) novoStatus = 'Vencido';
+            else if (diasVencerCalc <= 30) novoStatus = 'Renovar';
+            else novoStatus = 'OK';
             
             status.value = novoStatus;
             this.atualizarCorStatus(status, novoStatus);
-            
         } catch (error) {
             console.error('Erro no cálculo NR-17:', error);
+        } finally {
+            this.atualizarVisibilidadeBotoesEmissao('nr17');
         }
     }
     
@@ -5484,64 +6345,57 @@ class SysControleWeb {
         
         const emissaoValue = dataEmissao.value;
         
-        if (!emissaoValue || emissaoValue.length < 6) {
+        if (!emissaoValue || emissaoValue.length < 8) {
+            if (typeof vencimento !== 'undefined' && vencimento) vencimento.value = '';
+            if (typeof diasCorridos !== 'undefined' && diasCorridos) diasCorridos.value = '';
+            if (typeof diasVencer !== 'undefined' && diasVencer) diasVencer.value = '';
+            if (typeof status !== 'undefined' && status) status.value = '';
+            this.atualizarVisibilidadeBotoesEmissao('nr18');
             return;
         }
         
         try {
             // Converter data de emissão
             const parts = emissaoValue.split('/');
-            if (parts.length !== 3) return;
-            
-            let [dia, mes, ano] = parts;
-            
-            // Se ano tem apenas 2 dígitos, assumir 20xx
-            if (ano.length === 2) {
-                ano = '20' + ano;
-            }
-            
-            const dataEmissaoDate = new Date(ano, mes - 1, dia);
-            
-            if (isNaN(dataEmissaoDate.getTime())) {
+            if (parts.length !== 3) {
+                this.atualizarVisibilidadeBotoesEmissao('nr18');
                 return;
             }
             
-            // Calcular vencimento (2 anos após emissão)
+            let [dia, mes, ano] = parts;
+            if (ano.length === 2) ano = '20' + ano;
+            
+            const dataEmissaoDate = new Date(ano, mes - 1, dia);
+            if (isNaN(dataEmissaoDate.getTime())) {
+                this.atualizarVisibilidadeBotoesEmissao('nr18');
+                return;
+            }
+            
+            // ... rest of logic
             const vencimentoDate = new Date(dataEmissaoDate);
             vencimentoDate.setFullYear(vencimentoDate.getFullYear() + 2);
-            
-            // Preencher campo vencimento
             vencimento.value = vencimentoDate.toISOString().split('T')[0];
             
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
-            
-            // Calcular dias
             const diffEmissaoHoje = hoje.getTime() - dataEmissaoDate.getTime();
             const diasCorridosCalc = Math.floor(diffEmissaoHoje / (1000 * 60 * 60 * 24));
-            
             const diffHojeVencimento = vencimentoDate.getTime() - hoje.getTime();
             const diasVencerCalc = Math.ceil(diffHojeVencimento / (1000 * 60 * 60 * 24));
-            
-            // Preencher campos
             diasCorridos.value = diasCorridosCalc >= 0 ? diasCorridosCalc : 0;
             diasVencer.value = diasVencerCalc;
             
-            // Calcular status
             let novoStatus = '';
-            if (diasVencerCalc < 0) {
-                novoStatus = 'Vencido';
-            } else if (diasVencerCalc <= 30) {
-                novoStatus = 'Renovar';
-            } else {
-                novoStatus = 'OK';
-            }
+            if (diasVencerCalc < 0) novoStatus = 'Vencido';
+            else if (diasVencerCalc <= 30) novoStatus = 'Renovar';
+            else novoStatus = 'OK';
             
             status.value = novoStatus;
             this.atualizarCorStatus(status, novoStatus);
-            
         } catch (error) {
             console.error('Erro no cálculo NR-18:', error);
+        } finally {
+            this.atualizarVisibilidadeBotoesEmissao('nr18');
         }
     }
     
@@ -5559,64 +6413,57 @@ class SysControleWeb {
         
         const emissaoValue = dataEmissao.value;
         
-        if (!emissaoValue || emissaoValue.length < 6) {
+        if (!emissaoValue || emissaoValue.length < 8) {
+            if (typeof vencimento !== 'undefined' && vencimento) vencimento.value = '';
+            if (typeof diasCorridos !== 'undefined' && diasCorridos) diasCorridos.value = '';
+            if (typeof diasVencer !== 'undefined' && diasVencer) diasVencer.value = '';
+            if (typeof status !== 'undefined' && status) status.value = '';
+            this.atualizarVisibilidadeBotoesEmissao('nr33');
             return;
         }
         
         try {
             // Converter data de emissão
             const parts = emissaoValue.split('/');
-            if (parts.length !== 3) return;
-            
-            let [dia, mes, ano] = parts;
-            
-            // Se ano tem apenas 2 dígitos, assumir 20xx
-            if (ano.length === 2) {
-                ano = '20' + ano;
-            }
-            
-            const dataEmissaoDate = new Date(ano, mes - 1, dia);
-            
-            if (isNaN(dataEmissaoDate.getTime())) {
+            if (parts.length !== 3) {
+                this.atualizarVisibilidadeBotoesEmissao('nr33');
                 return;
             }
             
-            // Calcular vencimento (2 anos após emissão)
+            let [dia, mes, ano] = parts;
+            if (ano.length === 2) ano = '20' + ano;
+            
+            const dataEmissaoDate = new Date(ano, mes - 1, dia);
+            if (isNaN(dataEmissaoDate.getTime())) {
+                this.atualizarVisibilidadeBotoesEmissao('nr33');
+                return;
+            }
+            
+            // ... rest of logic
             const vencimentoDate = new Date(dataEmissaoDate);
             vencimentoDate.setFullYear(vencimentoDate.getFullYear() + 2);
-            
-            // Preencher campo vencimento
             vencimento.value = vencimentoDate.toISOString().split('T')[0];
             
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
-            
-            // Calcular dias
             const diffEmissaoHoje = hoje.getTime() - dataEmissaoDate.getTime();
             const diasCorridosCalc = Math.floor(diffEmissaoHoje / (1000 * 60 * 60 * 24));
-            
             const diffHojeVencimento = vencimentoDate.getTime() - hoje.getTime();
             const diasVencerCalc = Math.ceil(diffHojeVencimento / (1000 * 60 * 60 * 24));
-            
-            // Preencher campos
             diasCorridos.value = diasCorridosCalc >= 0 ? diasCorridosCalc : 0;
             diasVencer.value = diasVencerCalc;
             
-            // Calcular status
             let novoStatus = '';
-            if (diasVencerCalc < 0) {
-                novoStatus = 'Vencido';
-            } else if (diasVencerCalc <= 30) {
-                novoStatus = 'Renovar';
-            } else {
-                novoStatus = 'OK';
-            }
+            if (diasVencerCalc < 0) novoStatus = 'Vencido';
+            else if (diasVencerCalc <= 30) novoStatus = 'Renovar';
+            else novoStatus = 'OK';
             
             status.value = novoStatus;
             this.atualizarCorStatus(status, novoStatus);
-            
         } catch (error) {
             console.error('Erro no cálculo NR-33:', error);
+        } finally {
+            this.atualizarVisibilidadeBotoesEmissao('nr33');
         }
     }
     
@@ -5634,64 +6481,57 @@ class SysControleWeb {
         
         const emissaoValue = dataEmissao.value;
         
-        if (!emissaoValue || emissaoValue.length < 6) {
+        if (!emissaoValue || emissaoValue.length < 8) {
+            if (typeof vencimento !== 'undefined' && vencimento) vencimento.value = '';
+            if (typeof diasCorridos !== 'undefined' && diasCorridos) diasCorridos.value = '';
+            if (typeof diasVencer !== 'undefined' && diasVencer) diasVencer.value = '';
+            if (typeof status !== 'undefined' && status) status.value = '';
+            this.atualizarVisibilidadeBotoesEmissao('nr35');
             return;
         }
         
         try {
             // Converter data de emissão
             const parts = emissaoValue.split('/');
-            if (parts.length !== 3) return;
-            
-            let [dia, mes, ano] = parts;
-            
-            // Se ano tem apenas 2 dígitos, assumir 20xx
-            if (ano.length === 2) {
-                ano = '20' + ano;
-            }
-            
-            const dataEmissaoDate = new Date(ano, mes - 1, dia);
-            
-            if (isNaN(dataEmissaoDate.getTime())) {
+            if (parts.length !== 3) {
+                this.atualizarVisibilidadeBotoesEmissao('nr35');
                 return;
             }
             
-            // Calcular vencimento (2 anos após emissão)
+            let [dia, mes, ano] = parts;
+            if (ano.length === 2) ano = '20' + ano;
+            
+            const dataEmissaoDate = new Date(ano, mes - 1, dia);
+            if (isNaN(dataEmissaoDate.getTime())) {
+                this.atualizarVisibilidadeBotoesEmissao('nr35');
+                return;
+            }
+            
+            // ... rest of logic
             const vencimentoDate = new Date(dataEmissaoDate);
             vencimentoDate.setFullYear(vencimentoDate.getFullYear() + 2);
-            
-            // Preencher campo vencimento
             vencimento.value = vencimentoDate.toISOString().split('T')[0];
             
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
-            
-            // Calcular dias
             const diffEmissaoHoje = hoje.getTime() - dataEmissaoDate.getTime();
             const diasCorridosCalc = Math.floor(diffEmissaoHoje / (1000 * 60 * 60 * 24));
-            
             const diffHojeVencimento = vencimentoDate.getTime() - hoje.getTime();
             const diasVencerCalc = Math.ceil(diffHojeVencimento / (1000 * 60 * 60 * 24));
-            
-            // Preencher campos
             diasCorridos.value = diasCorridosCalc >= 0 ? diasCorridosCalc : 0;
             diasVencer.value = diasVencerCalc;
             
-            // Calcular status
             let novoStatus = '';
-            if (diasVencerCalc < 0) {
-                novoStatus = 'Vencido';
-            } else if (diasVencerCalc <= 30) {
-                novoStatus = 'Renovar';
-            } else {
-                novoStatus = 'OK';
-            }
+            if (diasVencerCalc < 0) novoStatus = 'Vencido';
+            else if (diasVencerCalc <= 30) novoStatus = 'Renovar';
+            else novoStatus = 'OK';
             
             status.value = novoStatus;
             this.atualizarCorStatus(status, novoStatus);
-            
         } catch (error) {
             console.error('Erro no cálculo NR-35:', error);
+        } finally {
+            this.atualizarVisibilidadeBotoesEmissao('nr35');
         }
     }
     
@@ -5702,6 +6542,7 @@ class SysControleWeb {
         const diasCorridos = document.getElementById('nr06_diasCorridos');
         const diasVencer = document.getElementById('nr06_diasVencer');
         const status = document.getElementById('nr06_status');
+        const validade2Anos = document.getElementById('nr06_validade2anos');
         
         if (!dataEmissao || !vencimento || !diasCorridos || !diasVencer || !status) {
             return;
@@ -5709,62 +6550,58 @@ class SysControleWeb {
         
         const emissaoValue = dataEmissao.value;
         
-        if (!emissaoValue || emissaoValue.length < 10) {
+        if (!emissaoValue || emissaoValue.length < 8) {
+            if (typeof vencimento !== 'undefined' && vencimento) vencimento.value = '';
+            if (typeof diasCorridos !== 'undefined' && diasCorridos) diasCorridos.value = '';
+            if (typeof diasVencer !== 'undefined' && diasVencer) diasVencer.value = '';
+            if (typeof status !== 'undefined' && status) status.value = '';
+            this.atualizarVisibilidadeBotoesEmissao('nr06');
             return;
         }
         
         try {
             // Converter data de emissão
-            const [dia, mes, ano] = emissaoValue.split('/');
-            const dataEmissaoDate = new Date(ano, mes - 1, dia);
-            
-            if (isNaN(dataEmissaoDate.getTime())) {
+            const parts = emissaoValue.split('/');
+            if (parts.length !== 3) {
+                this.atualizarVisibilidadeBotoesEmissao('nr06');
                 return;
             }
             
-            // Calcular vencimento (1 ano após emissão)
-            const vencimentoDate = new Date(dataEmissaoDate);
-            vencimentoDate.setFullYear(vencimentoDate.getFullYear() + 1);
+            let [dia, mes, ano] = parts;
+            if (ano.length === 2) ano = '20' + ano;
             
-            // Preencher campo vencimento
-            const vencimentoFormatado = vencimentoDate.toISOString().split('T')[0];
-            vencimento.value = vencimentoFormatado;
-            vencimento.dispatchEvent(new Event('change', { bubbles: true }));
-            vencimento.dispatchEvent(new Event('input', { bubbles: true }));
+            const dataEmissaoDate = new Date(ano, mes - 1, dia);
+            if (isNaN(dataEmissaoDate.getTime())) {
+                this.atualizarVisibilidadeBotoesEmissao('nr06');
+                return;
+            }
+            
+            // ... rest of logic
+            const anosValidade = (validade2Anos && validade2Anos.checked) ? 2 : 1;
+            const vencimentoDate = new Date(dataEmissaoDate);
+            vencimentoDate.setFullYear(vencimentoDate.getFullYear() + anosValidade);
+            vencimento.value = vencimentoDate.toISOString().split('T')[0];
             
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
-            
-            // Calcular dias
             const diffEmissaoHoje = hoje.getTime() - dataEmissaoDate.getTime();
             const diasCorridosCalc = Math.floor(diffEmissaoHoje / (1000 * 60 * 60 * 24));
-            
             const diffHojeVencimento = vencimentoDate.getTime() - hoje.getTime();
             const diasVencerCalc = Math.ceil(diffHojeVencimento / (1000 * 60 * 60 * 24));
-            
-            // Preencher campos
             diasCorridos.value = diasCorridosCalc >= 0 ? diasCorridosCalc : 0;
-            diasCorridos.dispatchEvent(new Event('change', { bubbles: true }));
-            
             diasVencer.value = diasVencerCalc;
-            diasVencer.dispatchEvent(new Event('change', { bubbles: true }));
             
-            // Calcular status
             let novoStatus = '';
-            if (diasVencerCalc < 0) {
-                novoStatus = 'Vencido';
-            } else if (diasVencerCalc <= 30) {
-                novoStatus = 'Renovar';
-            } else {
-                novoStatus = 'OK';
-            }
+            if (diasVencerCalc < 0) novoStatus = 'Vencido';
+            else if (diasVencerCalc <= 30) novoStatus = 'Renovar';
+            else novoStatus = 'OK';
             
             status.value = novoStatus;
-            status.dispatchEvent(new Event('change', { bubbles: true }));
             this.atualizarCorStatus(status, novoStatus);
-            
         } catch (error) {
             console.error('Erro no cálculo NR-06:', error);
+        } finally {
+            this.atualizarVisibilidadeBotoesEmissao('nr06');
         }
     }
     
@@ -5782,71 +6619,57 @@ class SysControleWeb {
         
         const emissaoValue = dataEmissao.value;
         
-        if (!emissaoValue || emissaoValue.length < 6) {
+        if (!emissaoValue || emissaoValue.length < 8) {
+            if (typeof vencimento !== 'undefined' && vencimento) vencimento.value = '';
+            if (typeof diasCorridos !== 'undefined' && diasCorridos) diasCorridos.value = '';
+            if (typeof diasVencer !== 'undefined' && diasVencer) diasVencer.value = '';
+            if (typeof status !== 'undefined' && status) status.value = '';
+            this.atualizarVisibilidadeBotoesEmissao('nr20');
             return;
         }
         
         try {
             // Converter data de emissão
             const parts = emissaoValue.split('/');
-            if (parts.length !== 3) return;
-            
-            let [dia, mes, ano] = parts;
-            
-            // Se ano tem apenas 2 dígitos, assumir 20xx
-            if (ano.length === 2) {
-                ano = '20' + ano;
-            }
-            
-            const dataEmissaoDate = new Date(ano, mes - 1, dia);
-            
-            if (isNaN(dataEmissaoDate.getTime())) {
+            if (parts.length !== 3) {
+                this.atualizarVisibilidadeBotoesEmissao('nr20');
                 return;
             }
             
-            // Calcular vencimento (2 anos após emissão)
+            let [dia, mes, ano] = parts;
+            if (ano.length === 2) ano = '20' + ano;
+            
+            const dataEmissaoDate = new Date(ano, mes - 1, dia);
+            if (isNaN(dataEmissaoDate.getTime())) {
+                this.atualizarVisibilidadeBotoesEmissao('nr20');
+                return;
+            }
+            
+            // ... rest of logic
             const vencimentoDate = new Date(dataEmissaoDate);
             vencimentoDate.setFullYear(vencimentoDate.getFullYear() + 2);
-            
-            // Preencher campo vencimento
-            const vencimentoFormatado = vencimentoDate.toISOString().split('T')[0];
-            vencimento.value = vencimentoFormatado;
-            vencimento.dispatchEvent(new Event('change', { bubbles: true }));
-            vencimento.dispatchEvent(new Event('input', { bubbles: true }));
+            vencimento.value = vencimentoDate.toISOString().split('T')[0];
             
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
-            
-            // Calcular dias
             const diffEmissaoHoje = hoje.getTime() - dataEmissaoDate.getTime();
             const diasCorridosCalc = Math.floor(diffEmissaoHoje / (1000 * 60 * 60 * 24));
-            
             const diffHojeVencimento = vencimentoDate.getTime() - hoje.getTime();
             const diasVencerCalc = Math.ceil(diffHojeVencimento / (1000 * 60 * 60 * 24));
-            
-            // Preencher campos
             diasCorridos.value = diasCorridosCalc >= 0 ? diasCorridosCalc : 0;
-            diasCorridos.dispatchEvent(new Event('change', { bubbles: true }));
-            
             diasVencer.value = diasVencerCalc;
-            diasVencer.dispatchEvent(new Event('change', { bubbles: true }));
             
-            // Calcular status
             let novoStatus = '';
-            if (diasVencerCalc < 0) {
-                novoStatus = 'Vencido';
-            } else if (diasVencerCalc <= 30) {
-                novoStatus = 'Renovar';
-            } else {
-                novoStatus = 'OK';
-            }
+            if (diasVencerCalc < 0) novoStatus = 'Vencido';
+            else if (diasVencerCalc <= 30) novoStatus = 'Renovar';
+            else novoStatus = 'OK';
             
             status.value = novoStatus;
-            status.dispatchEvent(new Event('change', { bubbles: true }));
             this.atualizarCorStatus(status, novoStatus);
-            
         } catch (error) {
             console.error('Erro no cálculo NR-20:', error);
+        } finally {
+            this.atualizarVisibilidadeBotoesEmissao('nr20');
         }
     }
     
@@ -5864,71 +6687,57 @@ class SysControleWeb {
         
         const emissaoValue = dataEmissao.value;
         
-        if (!emissaoValue || emissaoValue.length < 6) {
+        if (!emissaoValue || emissaoValue.length < 8) {
+            if (typeof vencimento !== 'undefined' && vencimento) vencimento.value = '';
+            if (typeof diasCorridos !== 'undefined' && diasCorridos) diasCorridos.value = '';
+            if (typeof diasVencer !== 'undefined' && diasVencer) diasVencer.value = '';
+            if (typeof status !== 'undefined' && status) status.value = '';
+            this.atualizarVisibilidadeBotoesEmissao('nr34');
             return;
         }
         
         try {
             // Converter data de emissão
             const parts = emissaoValue.split('/');
-            if (parts.length !== 3) return;
-            
-            let [dia, mes, ano] = parts;
-            
-            // Se ano tem apenas 2 dígitos, assumir 20xx
-            if (ano.length === 2) {
-                ano = '20' + ano;
-            }
-            
-            const dataEmissaoDate = new Date(ano, mes - 1, dia);
-            
-            if (isNaN(dataEmissaoDate.getTime())) {
+            if (parts.length !== 3) {
+                this.atualizarVisibilidadeBotoesEmissao('nr34');
                 return;
             }
             
-            // Calcular vencimento (2 anos após emissão)
+            let [dia, mes, ano] = parts;
+            if (ano.length === 2) ano = '20' + ano;
+            
+            const dataEmissaoDate = new Date(ano, mes - 1, dia);
+            if (isNaN(dataEmissaoDate.getTime())) {
+                this.atualizarVisibilidadeBotoesEmissao('nr34');
+                return;
+            }
+            
+            // ... rest of logic
             const vencimentoDate = new Date(dataEmissaoDate);
             vencimentoDate.setFullYear(vencimentoDate.getFullYear() + 2);
-            
-            // Preencher campo vencimento
-            const vencimentoFormatado = vencimentoDate.toISOString().split('T')[0];
-            vencimento.value = vencimentoFormatado;
-            vencimento.dispatchEvent(new Event('change', { bubbles: true }));
-            vencimento.dispatchEvent(new Event('input', { bubbles: true }));
+            vencimento.value = vencimentoDate.toISOString().split('T')[0];
             
             const hoje = new Date();
             hoje.setHours(0, 0, 0, 0);
-            
-            // Calcular dias
             const diffEmissaoHoje = hoje.getTime() - dataEmissaoDate.getTime();
             const diasCorridosCalc = Math.floor(diffEmissaoHoje / (1000 * 60 * 60 * 24));
-            
             const diffHojeVencimento = vencimentoDate.getTime() - hoje.getTime();
             const diasVencerCalc = Math.ceil(diffHojeVencimento / (1000 * 60 * 60 * 24));
-            
-            // Preencher campos
             diasCorridos.value = diasCorridosCalc >= 0 ? diasCorridosCalc : 0;
-            diasCorridos.dispatchEvent(new Event('change', { bubbles: true }));
-            
             diasVencer.value = diasVencerCalc;
-            diasVencer.dispatchEvent(new Event('change', { bubbles: true }));
             
-            // Calcular status
             let novoStatus = '';
-            if (diasVencerCalc < 0) {
-                novoStatus = 'Vencido';
-            } else if (diasVencerCalc <= 30) {
-                novoStatus = 'Renovar';
-            } else {
-                novoStatus = 'OK';
-            }
+            if (diasVencerCalc < 0) novoStatus = 'Vencido';
+            else if (diasVencerCalc <= 30) novoStatus = 'Renovar';
+            else novoStatus = 'OK';
             
             status.value = novoStatus;
-            status.dispatchEvent(new Event('change', { bubbles: true }));
             this.atualizarCorStatus(status, novoStatus);
-            
         } catch (error) {
             console.error('Erro no cálculo NR-34:', error);
+        } finally {
+            this.atualizarVisibilidadeBotoesEmissao('nr34');
         }
     }
     
@@ -5946,31 +6755,38 @@ class SysControleWeb {
         
         const emissaoValue = dataEmissao.value;
         
-        if (!emissaoValue || emissaoValue.length < 6) {
+        if (!emissaoValue || emissaoValue.length < 8) {
+            if (typeof vencimento !== 'undefined' && vencimento) vencimento.value = '';
+            if (typeof diasCorridos !== 'undefined' && diasCorridos) diasCorridos.value = '';
+            if (typeof diasVencer !== 'undefined' && diasVencer) diasVencer.value = '';
+            if (typeof status !== 'undefined' && status) status.value = '';
+            this.atualizarVisibilidadeBotoesEmissao('epi');
             return;
         }
         
         try {
             // Converter data de emissão
             const parts = emissaoValue.split('/');
-            if (parts.length !== 3) return;
-            
-            let [dia, mes, ano] = parts;
-            
-            // Se ano tem apenas 2 dígitos, assumir 20xx
-            if (ano.length === 2) {
-                ano = '20' + ano;
-            }
-            
-            const dataEmissaoDate = new Date(ano, mes - 1, dia);
-            
-            if (isNaN(dataEmissaoDate.getTime())) {
+            if (parts.length !== 3) {
+                this.atualizarVisibilidadeBotoesEmissao('epi');
                 return;
             }
             
-            // Calcular vencimento (4 meses após emissão para EPI)
+            let [dia, mes, ano] = parts;
+            if (ano.length === 2) ano = '20' + ano;
+            
+            const dataEmissaoDate = new Date(ano, mes - 1, dia);
+            if (isNaN(dataEmissaoDate.getTime())) {
+                this.atualizarVisibilidadeBotoesEmissao('epi');
+                return;
+            }
+            
+            const validade8Meses = document.getElementById('epi_validade8meses');
+            
+            // Calcular vencimento (4 ou 8 meses após emissão para EPI)
+            const mesesValidade = (validade8Meses && validade8Meses.checked) ? 8 : 4;
             const vencimentoDate = new Date(dataEmissaoDate);
-            vencimentoDate.setMonth(vencimentoDate.getMonth() + 4);
+            vencimentoDate.setMonth(vencimentoDate.getMonth() + mesesValidade);
             
             // Preencher campo vencimento
             vencimento.value = vencimentoDate.toISOString().split('T')[0];
@@ -5991,19 +6807,16 @@ class SysControleWeb {
             
             // Calcular status
             let novoStatus = '';
-            if (diasVencerCalc < 0) {
-                novoStatus = 'Vencido';
-            } else if (diasVencerCalc <= 30) {
-                novoStatus = 'Renovar';
-            } else {
-                novoStatus = 'OK';
-            }
+            if (diasVencerCalc < 0) novoStatus = 'Vencido';
+            else if (diasVencerCalc <= 30) novoStatus = 'Renovar';
+            else novoStatus = 'OK';
             
             status.value = novoStatus;
             this.atualizarCorStatus(status, novoStatus);
-            
         } catch (error) {
             console.error('Erro no cálculo EPI:', error);
+        } finally {
+            this.atualizarVisibilidadeBotoesEmissao('epi');
         }
     }
     
@@ -7012,18 +7825,26 @@ class SysControleWeb {
         input.value = value;
     }
     
-    // Formatação automática de telefone
+    // Formatação automática de telefone (Fixo: (11) 0000-0000)
     formatarTelefone(input) {
-        let value = input.value.replace(/\D/g, '');
+        let value = input.value.replace(/\D/g, ''); // Remove tudo que não é número
         
-        if (value.length <= 10) {
-            // Telefone fixo: (11) 0000-0000
-            value = value.replace(/^(\d{2})(\d)/, '($1) $2');
-            value = value.replace(/(\d{4})(\d)/, '$1-$2');
-        } else {
-            // Celular: (11) 90000-0000
-            value = value.replace(/^(\d{2})(\d)/, '($1) $2');
-            value = value.replace(/(\d{5})(\d)/, '$1-$2');
+        // Limitar a 10 dígitos para telefone fixo
+        if (value.length > 10) {
+            value = value.substring(0, 10);
+        }
+        
+        // Formatar conforme o usuário digita: (11) 2554-9900
+        if (value.length > 0) {
+            if (value.length <= 2) {
+                value = '(' + value;
+            } else if (value.length <= 3) {
+                value = '(' + value.substring(0, 2) + ') ' + value.substring(2);
+            } else if (value.length <= 6) {
+                value = '(' + value.substring(0, 2) + ') ' + value.substring(2, 6) + '-' + value.substring(6);
+            } else {
+                value = '(' + value.substring(0, 2) + ') ' + value.substring(2, 6) + '-' + value.substring(6, 10);
+            }
         }
         
         input.value = value;
@@ -7170,11 +7991,24 @@ class SysControleWeb {
         const primeiraHabilitada = document.querySelector('.nr-tab:not([style*="display: none"])');
         if (primeiraHabilitada) {
             const nrType = primeiraHabilitada.dataset.nr;
-            this.switchNRTab(nrType);
+            this.switchNRTab(nrType, true); // true = force (pular Dirty Check)
         }
     }
     
     fecharModals() {
+        // Verificar Dirty Check do formulário principal antes de fechar
+        const modalForm = document.getElementById('modalForm');
+        if (modalForm && modalForm.style.display === 'block') {
+            if (this.isFormDirty()) {
+                if (!confirm('Deseja sair sem fazer a alteração? Os dados serão perdidos.')) {
+                    return;
+                }
+                // Se saiu sem salvar, revertemos os campos (pode ser útil se abrir o mesmo registro depois)
+                this.reverterFormulario();
+                this.formOriginalSnapshot = null;
+            }
+        }
+
         // Limpar seleção e resetar estado de edição
         this.selectedRows.clear();
         this.editingId = null;
@@ -7229,29 +8063,35 @@ class SysControleWeb {
         }
     }
     
-    mostrarImagemDuplicata(imagemUrl, mensagem) {
-        // Criar modal com só a imagem
+    mostrarImagemDuplicata(imagemUrl, mensagem, inputToClear = null) {
+        // Remover qualquer modal de duplicata anterior
+        const anterior = document.getElementById('modal-imagem-duplicata');
+        if (anterior) anterior.remove();
+
         const modal = document.createElement('div');
+        modal.id = 'modal-imagem-duplicata';
         modal.style.cssText = `
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.85);
             display: flex;
             align-items: center;
             justify-content: center;
-            z-index: 10000;
+            z-index: 999999;
+            cursor: pointer;
         `;
         
         const container = document.createElement('div');
         container.style.cssText = `
             background: white;
-            padding: 20px;
-            border-radius: 10px;
+            padding: 30px;
+            border-radius: 12px;
             text-align: center;
-            max-width: 500px;
+            max-width: 600px;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.5);
         `;
         
         const img = document.createElement('img');
@@ -7259,34 +8099,45 @@ class SysControleWeb {
         img.style.cssText = `
             max-width: 100%;
             height: auto;
-            margin-bottom: 15px;
-            cursor: pointer;
+            margin-bottom: 20px;
         `;
         
         const texto = document.createElement('p');
-        texto.textContent = mensagem;
+        texto.innerHTML = mensagem ? mensagem.replace(/\n/g, '<br>') : '';
         texto.style.cssText = `
-            font-size: 13px;
-            color: #666;
+            font-size: 16px;
+            color: #333;
             margin: 0;
-            line-height: 1.5;
+            line-height: 1.6;
+            font-weight: bold;
         `;
         
-        // Fechar ao clicar na imagem ou fora
-        img.onclick = () => modal.remove();
-        modal.onclick = (e) => {
-            if (e.target === modal) modal.remove();
+        // Função unificada para fechar e limpar
+        const fecharTudo = () => {
+            if (modal.parentNode) {
+                modal.remove();
+                if (inputToClear) {
+                    inputToClear.value = '';
+                    inputToClear.focus();
+                }
+                window.removeEventListener('keydown', handler);
+                window.removeEventListener('mousemove', handler);
+                window.removeEventListener('mousedown', handler);
+            }
         };
+
+        const handler = () => fecharTudo();
+        
+        // Adicionar ouvintes para fechar IMEDIATAMENTE em qualquer interação
+        window.addEventListener('keydown', handler);
+        window.addEventListener('mousemove', handler);
+        window.addEventListener('mousedown', handler);
+        modal.onclick = fecharTudo;
         
         container.appendChild(img);
         container.appendChild(texto);
         modal.appendChild(container);
         document.body.appendChild(modal);
-        
-        // Auto fechar após 5 segundos
-        setTimeout(() => {
-            if (modal.parentNode) modal.remove();
-        }, 5000);
     }
     
     mostrarZoomFoto(fotoUrl) {
@@ -7321,15 +8172,6 @@ class SysControleWeb {
             if (e.target === modal) modal.remove();
         };
         
-        // Fechar com ESC
-        const handleEsc = (e) => {
-            if (e.key === 'Escape') {
-                modal.remove();
-                document.removeEventListener('keydown', handleEsc);
-            }
-        };
-        document.addEventListener('keydown', handleEsc);
-        
         modal.appendChild(img);
         document.body.appendChild(modal);
     }
@@ -7341,6 +8183,7 @@ class SysControleWeb {
             if (response.ok) {
                 const config = await response.json();
                 document.getElementById('configTitulo').value = config?.titulo || '';
+                document.getElementById('configTecnico').value = config?.tecnico_seguranca || '';
                 document.getElementById('previewTitulo').textContent = config?.titulo || 'Título do Relatório';
                 
                 // Carregar logo
@@ -7385,6 +8228,7 @@ class SysControleWeb {
     // Salvar configuração do relatório
     async salvarConfiguracao() {
         const titulo = document.getElementById('configTitulo').value.trim();
+        const tecnico = document.getElementById('configTecnico').value.trim();
         const logo = this.logoBase64 || this.logoAtual || '/Logo-Hoss.jpg';
         
         try {
@@ -7393,6 +8237,7 @@ class SysControleWeb {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     titulo: titulo || 'Relatório de Cursos',
+                    tecnico_seguranca: tecnico,
                     rodape: 'SSMA',
                     logo: logo
                 })
@@ -7586,7 +8431,11 @@ class SysControleWeb {
         // Se não for TAB, não fazer nada
         if (event.key !== 'Tab') return;
         
+        // CRÍTICO: Prevenir comportamento padrão do Tab E parar propagação
+        // para evitar que o browser mova o foco para outro elemento focável
         event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
         
         // Descobrir qual aba está ativa atualmente
         const abaAtiva = document.querySelector('.nr-tab.active');
@@ -7624,7 +8473,7 @@ class SysControleWeb {
                 return;
             }
             if (campoAtual === 'anotacoes') {
-                // Ir para próxima aba habilitada
+                // Ir para próxima aba habilitada - SEM setTimeout para evitar janela de vulnerabilidade
                 this.irParaProximaAbaHabilitada();
                 return;
             }
@@ -7682,14 +8531,13 @@ class SysControleWeb {
         // Mudar para a próxima aba
         this.switchNRTab(proximaAbaNr);
         
-        // Focar no campo de data de emissão da próxima aba
-        setTimeout(() => {
-            const campoFoco = this.getCampoFocoPorAba(proximaAbaNr);
-            if (campoFoco) {
-                campoFoco.focus();
-                campoFoco.select();
-            }
-        }, 100);
+        // Focar imediatamente no campo da próxima aba (sem delay para evitar que o foco
+        // vá para um elemento indesejado durante a janela do setTimeout)
+        const campoFoco = this.getCampoFocoPorAba(proximaAbaNr);
+        if (campoFoco) {
+            campoFoco.focus();
+            campoFoco.select();
+        }
     }
     
     // Retorna o campo de foco principal de cada aba
@@ -7822,7 +8670,8 @@ class SysControleWeb {
         this.currentPage = 1;
         this.loadData();
     }
-    
+
+
     // Obter lista de cursos que têm filtros ativos (diferente de "Todos")
     obterFiltrosAtivos() {
         const cursos = ['aso', 'nr06', 'nr10', 'nr11', 'nr12', 'nr17', 'nr18', 'nr20', 'nr33', 'nr34', 'nr35', 'epi'];
@@ -7923,16 +8772,18 @@ class SysControleWeb {
             // Buscar TODOS os fornecedores (ativos e inativos)
             const response = await fetch('/api/fornecedores?situacao=all');
             if (response.ok) {
-                const fornecedores = await response.json();
+                const result = await response.json();
+                console.log('📦 Fornecedores recebidos:', result);
+                
+                // A API deve retornar array, mas tratamos se vier {data:[]}
+                const fornecedores = Array.isArray(result) ? result : (result.data || []);
                 
                 // Aplicar filtro de situação
                 let fornecedoresFiltrados = fornecedores;
                 
-                // Se filtroMostrarApenasInativos está true, mostrar apenas inativos
                 if (this.filtroMostrarApenasInativos === true) {
                     fornecedoresFiltrados = fornecedores.filter(f => f.Situacao === 'N');
                 } else {
-                    // Por padrão, mostrar apenas ativos
                     fornecedoresFiltrados = fornecedores.filter(f => f.Situacao === 'S');
                 }
                 
@@ -7995,9 +8846,9 @@ class SysControleWeb {
             
             return `
             <div class="grid-row" data-id="${fornecedor.id}" onclick="syscontrole.selecionarFornecedor(${fornecedor.id})" ondblclick="syscontrole.editarFornecedor(${fornecedor.id})">
-                <div class="grid-cell empresa">${fornecedor.Empresa || ''}</div>
-                <div class="grid-cell cnpj">${fornecedor.CNPJ || ''}</div>
-                <div class="grid-cell contato">${fornecedor.Contato || ''}</div>
+                <div class="grid-cell empresa" title="${fornecedor.Empresa || ''}">${fornecedor.Empresa || ''}</div>
+                <div class="grid-cell cnpj" title="${fornecedor.CNPJ || ''}">${fornecedor.CNPJ || ''}</div>
+                <div class="grid-cell contato" title="${fornecedor.Contato || ''}">${fornecedor.Contato || ''}</div>
                 <div class="grid-cell data-cadastro">${dataCadastro}</div>
                 <div class="grid-cell data-inativacao">${dataInativacao}</div>
                 <div class="grid-cell situacao">
@@ -8046,7 +8897,8 @@ class SysControleWeb {
             const response = await fetch('/api/fornecedores?situacao=all');
             if (!response.ok) throw new Error('Erro ao carregar fornecedores');
             
-            const todosFornecedores = await response.json();
+            const result = await response.json();
+            const todosFornecedores = Array.isArray(result) ? result : (result.data || []);
             
             const total = todosFornecedores.length;
             const ativos = todosFornecedores.filter(f => f.Situacao === 'S').length;
@@ -8641,6 +9493,43 @@ class SysControleWeb {
         return resultado;
     }
     
+    // ===== FORMULÁRIOS (Ordem de Serviço / PT) =====
+
+    abrirFormularios(skipReset = false) {
+        const modal = document.getElementById('modalFormularios');
+        if (!modal) return;
+        // Garantir aba OS ativa por padrão
+        this.trocarAbaFormulario('os');
+        modal.style.display = 'flex';
+
+        if (!skipReset) {
+            // Limpa campos básicos da OS ao abrir em branco pela barra de título
+            const campos = ['os-nome', 'os-setor', 'os-funcao', 'os-data', 'os-atividades'];
+            campos.forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+            // Desmarca checkboxes
+            document.querySelectorAll('#os-lista-riscos input, #os-lista-epis input').forEach(c => c.checked = false);
+        }
+    }
+
+    trocarAbaFormulario(aba) {
+        const abaOS = document.getElementById('conteudoAbaOS');
+        const abaPT = document.getElementById('conteudoAbaPT');
+        const btnOS = document.getElementById('tabBtnOS');
+        const btnPT = document.getElementById('tabBtnPT');
+
+        if (aba === 'os') {
+            if (abaOS) abaOS.style.display = 'block';
+            if (abaPT) abaPT.style.display = 'none';
+            if (btnOS) btnOS.style.cssText += '; background:#1a3a5c; color:#fff;';
+            if (btnPT) btnPT.style.cssText += '; background:#e0e8f0; color:#1a3a5c;';
+        } else {
+            if (abaOS) abaOS.style.display = 'none';
+            if (abaPT) abaPT.style.display = 'block';
+            if (btnOS) btnOS.style.cssText += '; background:#e0e8f0; color:#1a3a5c;';
+            if (btnPT) btnPT.style.cssText += '; background:#1a3a5c; color:#fff;';
+        }
+    }
+
     // Abrir modal de controle de presença
     async abrirControlePresenca() {
         const modal = document.getElementById('modalControlePresenca');
@@ -8734,7 +9623,7 @@ class SysControleWeb {
                 
                 bodyHtml += `<tr data-funcao="${func.Funcao || ''}" class="${classeEspecial}" onclick="syscontrole.destacarLinhaPresenca(this, event)">`;
                 bodyHtml += `<td class="col-empresa">${func.Empresa || ''}</td>`;
-                bodyHtml += `<td class="col-nome">`;
+                bodyHtml += `<td class="col-nome" title="${func.Nome || ''}">`;
                 if (isInativado) {
                     bodyHtml += `<strong style="color: #856404;">⚠️ ${func.Nome || ''}</strong> <span style="font-size: 10px; color: #856404;">(INATIVADO)</span>`;
                 } else if (isMudanca) {
@@ -8743,7 +9632,7 @@ class SysControleWeb {
                     bodyHtml += func.Nome || '';
                 }
                 bodyHtml += `</td>`;
-                bodyHtml += `<td class="col-funcao" style="${isMudanca ? 'color: #ff9800; font-weight: bold;' : ''}">${func.Funcao || ''}</td>`;
+                bodyHtml += `<td class="col-funcao" title="${func.Funcao || ''}" style="${isMudanca ? 'color: #ff9800; font-weight: bold;' : ''}">${func.Funcao || ''}</td>`;
                 
                 for (let dia = 1; dia <= diasNoMes; dia++) {
                     // Verificar se o dia está dentro do período válido para esta linha
@@ -8753,13 +9642,19 @@ class SysControleWeb {
                     let status = typeof dadosDia === 'object' ? (dadosDia.status || '') : (dadosDia || '');
                     const isFolgaSalva = typeof dadosDia === 'object' ? dadosDia.isFolga : false;
                     
+                    // ⭐ Se status é "AZUL", tratar como folga (vazio com formatação azul)
+                    const isAzulMarcado = status === 'AZUL';
+                    const statusOriginal = status; // Guardar status original
+                    if (isAzulMarcado) {
+                        status = ''; // Mostrar vazio no input
+                    }
+                    
                     // Verificar se é fim de semana
                     const isFimDeSemana = this.isFimDeSemanaOuFeriado(ano, mes, dia);
                     
-                    // ⭐ Aplicar azul se for fim de semana, folga salva OU ponto/hífen
-                    const isPontoOuHifen = (status === '.' || status === '-');
-                    const statusClass = status ? `status-${status.toLowerCase()}` : (isFolgaSalva || isFimDeSemana || isPontoOuHifen ? 'dia-folga-input' : '');
-                    const inputClass = isFimDeSemana || isFolgaSalva || isPontoOuHifen ? 'dia-folga-input' : '';
+                    // ⭐ CORREÇÃO: Aplicar azul se for fim de semana, folga salva OU marcado como AZUL
+                    const statusClass = status ? `status-${status.toLowerCase()}` : (isFolgaSalva || isFimDeSemana || isAzulMarcado ? 'dia-folga-input' : '');
+                    const inputClass = isFimDeSemana || isFolgaSalva || isAzulMarcado ? 'dia-folga-input' : '';
                     
                     // Verificar se tem comentário
                     const comentarioFunc = comentarios[func.id] || {};
@@ -8778,9 +9673,12 @@ class SysControleWeb {
                     // Adicionar classe para dias fora do período
                     const classeDiaFora = diaForaPeriodo ? 'dia-fora-periodo' : '';
                     
+                    // ⭐ IMPORTANTE: Adicionar data-status-original para manter o status AZUL
+                    const dataStatusOriginal = isAzulMarcado ? `data-status-original="AZUL"` : '';
+                    
                     bodyHtml += `<td class="col-dia ${classeDiaFora}">`;
                     bodyHtml += `<input type="text" class="presenca-input ${statusClass} ${inputClass} ${comentarioClass} ${classeDiaFora}" `;
-                    bodyHtml += `data-func="${func.id}" data-dia="${dia}" data-nome="${func.Nome || ''}" data-funcao="${func.Funcao || ''}" data-empresa="${func.Empresa || ''}" data-folga="${isFolgaSalva || isFimDeSemana || isPontoOuHifen}" ${comentarioData} ${comentarioTitle} `;
+                    bodyHtml += `data-func="${func.id}" data-dia="${dia}" data-nome="${func.Nome || ''}" data-funcao="${func.Funcao || ''}" data-empresa="${func.Empresa || ''}" data-folga="${isFolgaSalva || isFimDeSemana || isAzulMarcado}" ${dataStatusOriginal} ${comentarioData} ${comentarioTitle} `;
                     bodyHtml += `value="${diaForaPeriodo ? '' : status}" maxlength="2" ${readonlyAttr} `;
                     bodyHtml += `>`;
                     bodyHtml += '</td>';
@@ -9034,7 +9932,7 @@ class SysControleWeb {
     }
     
     // Formatar input de presença
-    async formatarPresenca(input) {
+    formatarPresenca(input) {
         let valor = input.value.toUpperCase();
         
         // ============================================
@@ -9052,9 +9950,11 @@ class SysControleWeb {
             
             console.log('🔍 DEBUG: Formatando', celulasParaFormatar.length, 'células');
             
-            for (const inp of celulasParaFormatar) {
-                // ⭐ SALVAR O PONTO (não limpar) mas com formatação azul
-                inp.value = '.';  // ⭐ Manter o ponto visível
+            celulasParaFormatar.forEach(inp => {
+                // ⭐ MARCAR com valor especial "AZUL" antes de limpar visualmente
+                inp.dataset.statusAzul = 'true';
+                inp.dataset.statusOriginal = 'AZUL'; // ⭐ ADICIONAR PARA PERSISTIR
+                inp.value = '';
                 inp.dataset.folga = 'true';
                 inp.className = 'presenca-input dia-folga-input';
                 
@@ -9064,8 +9964,8 @@ class SysControleWeb {
                 }
                 
                 // ⭐ SALVAR A FORMATAÇÃO NO BANCO
-                await this.salvarPresencaIndividual(inp);
-            }
+                this.salvarPresencaIndividual(inp);
+            });
             
             this.calcularTotaisPresenca();
             return;
@@ -9128,7 +10028,18 @@ class SysControleWeb {
         const funcionarioEmpresa = input.dataset.empresa || '';
         const funcionarioFuncao = input.dataset.funcao || '';
         
-        console.log(`💾 Salvando presença - Func ${funcId} Dia ${dia} Valor: "${valor}" Folga: ${isFolga}`);
+        // ⭐ PRIORIDADE 1: Se tem data-status-original="AZUL", manter AZUL
+        if (input.dataset.statusOriginal === 'AZUL' && valor === '') {
+            valor = 'AZUL';
+        }
+        // ⭐ PRIORIDADE 2: Se tem marcador de azul temporário, usar "AZUL" como status
+        else if (input.dataset.statusAzul === 'true') {
+            valor = 'AZUL';
+            // Limpar marcador após usar
+            delete input.dataset.statusAzul;
+            // Adicionar data-status-original para persistir
+            input.dataset.statusOriginal = 'AZUL';
+        }
         
         // Determinar formatação baseada na classe CSS
         let formatacao = 'normal';
@@ -9525,20 +10436,15 @@ class SysControleWeb {
                 }
             }
             
-            // Navegação normal se não tem seleção múltipla
-            this.salvarPresencaIndividual(input);
-            this.navegarPresenca(input, 'ArrowDown');
-            return;
-        }
-        
-        if (event.key === 'Escape') {
-            this.limparSelecaoPresenca();
-            return;
-        }
+        // Navegação normal se não tem seleção múltipla
+        this.salvarPresencaIndividual(input);
+        this.navegarPresenca(input, 'ArrowDown');
+        return;
     }
-    
-    // Abrir caixa de comentário na célula (Alt+Shift+A)
-    abrirComentarioCelula(input) {
+}
+
+// Abrir caixa de comentário na célula (Alt+Shift+A)
+abrirComentarioCelula(input) {
         const funcId = input.dataset.func;
         const dia = input.dataset.dia;
         const comentarioAtual = input.dataset.comentario || '';
@@ -9589,9 +10495,6 @@ class SysControleWeb {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.salvarComentarioCelula(funcId, dia);
-            }
-            if (e.key === 'Escape') {
-                this.fecharComentarioCelula();
             }
         });
     }
@@ -9778,9 +10681,6 @@ class SysControleWeb {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.salvarComentarioMultiplasCelulas();
-            }
-            if (e.key === 'Escape') {
-                this.fecharComentarioCelula();
             }
         });
     }
@@ -9985,6 +10885,15 @@ class SysControleWeb {
             const linhaFuncionario = input.closest('tr');
             const isInativado = linhaFuncionario && linhaFuncionario.classList.contains('funcionario-inativado');
             
+            // ⭐ FILTRO DINÂMICO: Ignorar linhas ocultas pelo filtro de consulta
+            if (linhaFuncionario && linhaFuncionario.style.display === 'none') {
+                // Inicializar totais por funcionário mesmo que oculto (para não quebrar os IDs)
+                if (!totaisPorFunc[funcId]) {
+                    totaisPorFunc[funcId] = { p: 0, f: 0 };
+                }
+                return;
+            }
+            
             // Totais por funcionário
             if (!totaisPorFunc[funcId]) {
                 totaisPorFunc[funcId] = { p: 0, f: 0 };
@@ -10008,7 +10917,7 @@ class SysControleWeb {
             
             if (status === 'P') {
                 totaisPorFunc[funcId].p++;
-                // CORRIGIDO: Contar TODOS na linha TOTAL, incluindo inativados
+                // Contar apenas linhas visíveis na linha TOTAL DO DIA
                 totaisPorDia.p[dia]++;
                 totalGeralP++;
                 
@@ -10016,21 +10925,21 @@ class SysControleWeb {
                     totaisPorFuncao[funcao].dias[dia]++;
                     totaisPorFuncao[funcao].totalP++;
                 }
-                // Contar por empresa - SEMPRE contar todos (ativos e inativos)
+                // Contar por empresa
                 if (empresa) {
                     totaisPorEmpresa[empresa].dias[dia]++;
                     totaisPorEmpresa[empresa].totalP++;
                 }
             } else if (status === 'F') {
                 totaisPorFunc[funcId].f++;
-                // CORRIGIDO: Contar TODOS na linha TOTAL, incluindo inativados
+                // Contar apenas linhas visíveis na linha FALTAS DO DIA
                 totaisPorDia.f[dia]++;
                 totalGeralF++;
                 
                 if (funcao) {
                     totaisPorFuncao[funcao].totalF++;
                 }
-                // Contar faltas por empresa - SEMPRE contar todos (ativos e inativos)
+                // Contar faltas por empresa
                 if (empresa) {
                     totaisPorEmpresa[empresa].totalF++;
                 }
@@ -10288,42 +11197,56 @@ class SysControleWeb {
             mesesNoPeriodo[dt.mesNome].push(dt);
         });
         
-        let htmlMeses = '<th colspan="3"></th>'; // Espaço acima de FUNÇÃO/EMPRESA
-        let htmlDias = '<th class="col-funcao-empresa">FUNÇÃO / EMPRESA</th>';
-        
         // Ordena os meses corretamente
         const mesesOrdenados = Object.keys(mesesNoPeriodo).sort((a, b) => {
             const ordem = { 'JANEIRO': 1, 'FEVEREIRO': 2, 'MARÇO': 3, 'ABRIL': 4, 'MAIO': 5, 'JUNHO': 6,
                            'JULHO': 7, 'AGOSTO': 8, 'SETEMBRO': 9, 'OUTUBRO': 10, 'NOVEMBRO': 11, 'DEZEMBRO': 12 };
             return (ordem[a] || 99) - (ordem[b] || 99);
         });
+
+        // Linha 1: Apenas os nomes dos meses, alinhados com os dias
+        let htmlLinha1 = '<th class="col-funcao-empresa header-mes" style="background-color: transparent; border: none;"></th>'; // Célula vazia invisível acima do título
         
-        // Cria as células superiores (JANEIRO / FEVEREIRO / etc) com o tamanho correto
         mesesOrdenados.forEach(nomeMes => {
             const totalDias = mesesNoPeriodo[nomeMes].length;
-            htmlMeses += `<th colspan="${totalDias}" class="header-mes">${nomeMes}</th>`;
+            htmlLinha1 += `<th colspan="${totalDias}" class="header-mes" style="background-color: #f1f3f5; color: #1a1a1a;">${nomeMes}</th>`;
         });
-        htmlMeses += '<th colspan="2"></th>'; // Espaço acima de TOTAL P e F
         
-        // Cria a linha dos dias com cores para fins de semana
+        htmlLinha1 += '<th colspan="2" class="header-mes" style="background-color: transparent; border: none;"></th>'; // Vazio acima de P e F
+
+        // Linha 2: Títulos Reais (Verde) e Dias
+        let htmlLinha2 = `<th class="col-funcao-empresa" style="background-color: #449d44; color: white; vertical-align: middle;">
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 5px;">
+                <span>FUNÇÃO / EMPRESA</span>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 10px; font-weight: bold; color: white; margin-bottom: 0;">
+                        <input type="checkbox" id="chkAtivosDia" ${this.tabelaMesApenasAtivos ? 'checked' : ''} onchange="syscontrole.toggleAtivosDia(this.checked)" style="cursor: pointer; width: 13px; height: 13px; margin: 0;">
+                        Ativos Hoje
+                    </label>
+                    <button onclick="syscontrole.capturarTabelaMes()" style="background: white; border: none; border-radius: 3px; cursor: pointer; padding: 2px 6px; display: flex; align-items: center; gap: 4px; font-size: 10px; font-weight: bold; color: #449d44; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'" title="Capturar imagem da tabela completa">
+                        <span>📸</span> Capturar
+                    </button>
+                </div>
+            </div>
+        </th>`;
         datas.forEach(dt => {
             const bgColor = (dt.isDescanso) ? 'background-color: #D9E8F5;' : '';
-            htmlDias += `<th class="col-dia-mes" style="${bgColor}">${dt.dia}</th>`;
+            htmlLinha2 += `<th class="col-dia-mes" style="${bgColor}">${dt.dia}</th>`;
         });
-        htmlDias += '<th class="col-total-mes">P</th>';
-        htmlDias += '<th class="col-total-mes">F</th>';
+        htmlLinha2 += '<th class="col-total-mes" style="background-color: #449d44; color: white;">P</th>';
+        htmlLinha2 += '<th class="col-total-mes" style="background-color: #449d44; color: white;">F</th>';
         
         document.getElementById('mesHeader').innerHTML = `
-            <tr class="header-mes-row">${htmlMeses}</tr>
-            <tr class="header-titulos">${htmlDias}</tr>
+            <tr class="header-titulos">${htmlLinha2}</tr>
+            <tr class="header-mes-row" style="height: 20px;">${htmlLinha1}</tr>
         `;
     }
     
     renderizarTabelaMes(datas, funcaoPorDia, empresaPorDia, faltasPorFuncaoPorDia, faltasPorEmpresaPorDia) {
         let htmlBody = '';
+        const idxHoje = datas.length - 1; // Último dia (hoje)
         
         // ===== SEÇÃO FUNÇÃO =====
-        htmlBody += '<tr style="background-color: #449d44; color: white;"><td colspan="' + (datas.length + 3) + '" style="text-align: center; font-weight: bold; padding: 8px;">FUNÇÃO</td></tr>';
         
         let totaisDiariosFunc = Array(datas.length).fill(0);
         let totalFaltasDiariosFunc = Array(datas.length).fill(0);
@@ -10333,22 +11256,32 @@ class SysControleWeb {
         Object.keys(funcaoPorDia).sort().forEach(func => {
             let somaPresenca = 0;
             let somaFaltas = 0;
-            let colunas = datas.map((dt, idx) => {
+            let colunasHtml = '';
+            
+            datas.forEach((dt, idx) => {
                 const qtdP = funcaoPorDia[func][idx] || 0;
                 const qtdF = (faltasPorFuncaoPorDia && faltasPorFuncaoPorDia[func] && faltasPorFuncaoPorDia[func][idx]) || 0;
+                
+                // SEMPRE somar aos totais (conforme solicitado pelo usuário, totais não mudam)
                 totaisDiariosFunc[idx] += qtdP;
                 totalFaltasDiariosFunc[idx] += qtdF;
                 somaPresenca += qtdP;
                 somaFaltas += qtdF;
                 
                 const bgColor = (dt.isDescanso) ? 'background-color: #D9E8F5;' : '';
-                return `<td class="col-dia-mes" style="${bgColor}">${qtdP}</td>`;
-            }).join('');
+                colunasHtml += `<td class="col-dia-mes" style="${bgColor}">${qtdP}</td>`;
+            });
             
             totalPresencaFuncao += somaPresenca;
             totalFaltasFuncao += somaFaltas;
             
-            htmlBody += `<tr><td class="col-funcao-empresa"><strong>${func}</strong></td>${colunas}<td class="col-total-mes" style="background-color: #C6EFCE; color: #006100; font-weight: bold;">${somaPresenca}</td><td class="col-total-mes" style="background-color: #FFC7CE; color: #9C0006; font-weight: bold;">${somaFaltas}</td></tr>`;
+            // FILTRO ATIVOS HOJE: Mostrar apenas se houver PRESENÇA hoje (P > 0)
+            const qtdPHoje = funcaoPorDia[func][idxHoje] || 0;
+            if (this.tabelaMesApenasAtivos && qtdPHoje === 0) {
+                return;
+            }
+            
+            htmlBody += `<tr><td class="col-funcao-empresa" title="${func}"><strong>${func}</strong></td>${colunasHtml}<td class="col-total-mes" style="background-color: #C6EFCE; color: #006100; font-weight: bold;">${somaPresenca}</td><td class="col-total-mes" style="background-color: #FFC7CE; color: #9C0006; font-weight: bold;">${somaFaltas}</td></tr>`;
         });
         
         // Linha TOTAL da seção FUNÇÃO - com contagem de cada coluna
@@ -10359,7 +11292,6 @@ class SysControleWeb {
         htmlBody += `<td class="col-total-mes" style="background-color: #00B050; color: #FFFFFF; font-weight: bold; font-size: 14px;">${totalPresencaFuncao}</td><td class="col-total-mes" style="background-color: #C00000; color: #FFFFFF; font-weight: bold; font-size: 14px;">${totalFaltasFuncao}</td></tr>`;
         
         // ===== SEÇÃO EMPRESA (mostrar TODAS as empresas) =====
-        htmlBody += '<tr style="background-color: #449d44; color: white;"><td colspan="' + (datas.length + 3) + '" style="text-align: center; font-weight: bold; padding: 8px;">EMPRESA</td></tr>';
         
         const empresasParaMostrar = Object.keys(empresaPorDia).sort();
         
@@ -10372,29 +11304,32 @@ class SysControleWeb {
         empresasParaMostrar.forEach(emp => {
             let somaPresenca = 0;
             let somaFaltas = 0;
-            let colunas = datas.map((dt, idx) => {
+            let colunasHtml = '';
+            
+            datas.forEach((dt, idx) => {
                 const qtdP = empresaPorDia[emp][idx] || 0;
                 const qtdF = (faltasPorEmpresaPorDia && faltasPorEmpresaPorDia[emp] && faltasPorEmpresaPorDia[emp][idx]) || 0;
+                
+                // SEMPRE somar aos totais
+                totaisDiariosEmp[idx] += qtdP;
+                totalFaltasDiariosEmp[idx] += qtdF;
                 somaPresenca += qtdP;
                 somaFaltas += qtdF;
                 
                 const bgColor = (dt.isDescanso) ? 'background-color: #D9E8F5;' : '';
-                return `<td class="col-dia-mes" style="${bgColor}">${qtdP}</td>`;
-            }).join('');
+                colunasHtml += `<td class="col-dia-mes" style="${bgColor}">${qtdP}</td>`;
+            });
             
-            htmlBody += `<tr><td class="col-funcao-empresa"><strong>${emp}</strong></td>${colunas}<td class="col-total-mes" style="background-color: #C6EFCE; color: #006100; font-weight: bold;">${somaPresenca}</td><td class="col-total-mes" style="background-color: #FFC7CE; color: #9C0006; font-weight: bold;">${somaFaltas}</td></tr>`;
-        });
-        
-        // Calcular TOTAL de TODAS as empresas (não apenas as mostradas)
-        Object.keys(empresaPorDia).forEach(emp => {
-            for (let idx = 0; idx < datas.length; idx++) {
-                const qtdP = empresaPorDia[emp][idx] || 0;
-                const qtdF = (faltasPorEmpresaPorDia && faltasPorEmpresaPorDia[emp] && faltasPorEmpresaPorDia[emp][idx]) || 0;
-                totaisDiariosEmp[idx] += qtdP;
-                totalFaltasDiariosEmp[idx] += qtdF;
-                totalPresencaEmpresa += qtdP;
-                totalFaltasEmpresa += qtdF;
+            totalPresencaEmpresa += somaPresenca;
+            totalFaltasEmpresa += somaFaltas;
+
+            // FILTRO ATIVOS HOJE: Mostrar apenas se houver PRESENÇA hoje (P > 0)
+            const qtdPHoje = empresaPorDia[emp][idxHoje] || 0;
+            if (this.tabelaMesApenasAtivos && qtdPHoje === 0) {
+                return;
             }
+
+            htmlBody += `<tr><td class="col-funcao-empresa" title="${emp}"><strong>${emp}</strong></td>${colunasHtml}<td class="col-total-mes" style="background-color: #C6EFCE; color: #006100; font-weight: bold;">${somaPresenca}</td><td class="col-total-mes" style="background-color: #FFC7CE; color: #9C0006; font-weight: bold;">${somaFaltas}</td></tr>`;
         });
         
         // Linha TOTAL da seção EMPRESA - com contagem de cada coluna (TOTAL DE TODAS)
@@ -10443,6 +11378,259 @@ class SysControleWeb {
             this.renderizarTabelaMes(this.tabelaMesDados.datas, this.tabelaMesDados.funcaoPorDia, this.tabelaMesDados.empresaPorDia, this.tabelaMesDados.faltasPorFuncaoPorDia, this.tabelaMesDados.faltasPorEmpresaPorDia);
         }
     }
+
+    toggleAtivosDia(checked) {
+        this.tabelaMesApenasAtivos = checked;
+        console.log(`🔍 Filtro Ativos Hoje: ${checked ? 'ATIVADO' : 'DESATIVADO'}`);
+        if (this.tabelaMesDados) {
+            this.renderizarTabelaMes(
+                this.tabelaMesDados.datas, 
+                this.tabelaMesDados.funcaoPorDia, 
+                this.tabelaMesDados.empresaPorDia, 
+                this.tabelaMesDados.faltasPorFuncaoPorDia, 
+                this.tabelaMesDados.faltasPorEmpresaPorDia
+            );
+        }
+    }
+
+    async capturarTabelaMes() {
+        const modalContent = document.querySelector('#modalTabelaMes .modal-content');
+        const container = document.querySelector('.mes-table-container');
+        if (!modalContent || !container) {
+            alert('Não foi possível encontrar a tabela para captura.');
+            return;
+        }
+
+        const originalMaxHeight = container.style.maxHeight;
+        const originalOverflow = container.style.overflow;
+
+        try {
+            console.log('📸 Gerando Relatório Profissional em Alta Definição...');
+            
+            document.body.classList.add('capturando-tabela');
+            
+            container.style.maxHeight = 'none';
+            container.style.overflow = 'visible';
+            
+            // Calcular largura real para emular desktop no celular
+            const larguraRealTabela = container.scrollWidth + 100; // Margem extra
+            
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            const rect = modalContent.getBoundingClientRect();
+            const agora = new Date();
+            const dataHoraStr = agora.toLocaleString('pt-BR');
+
+            const canvas = await html2canvas(modalContent, {
+                useCORS: true,
+                scale: 4, 
+                width: rect.width,
+                height: rect.height,
+                windowWidth: larguraRealTabela > 1600 ? larguraRealTabela : 1600, // Forçar largura de desktop
+                windowHeight: rect.height,
+                backgroundColor: '#ffffff',
+                logging: false,
+                onclone: (clonedDoc) => {
+                    const clonedContent = clonedDoc.querySelector('.modal-content');
+                    const clonedContainer = clonedDoc.querySelector('.mes-table-container');
+                    
+                    // 1. Injetar CSS de Alta Visibilidade para o Relatório
+                    const style = clonedDoc.createElement('style');
+                    style.innerHTML = `
+                        .modal-content { 
+                            padding: 40px !important; 
+                            border: none !important; 
+                            box-shadow: none !important; 
+                            width: fit-content !important; 
+                            min-width: 1000px !important;
+                            max-width: none !important;
+                        }
+                        .tabela-mes { border: 2px solid #000 !important; border-collapse: collapse !important; width: 100% !important; }
+                        .tabela-mes th, .tabela-mes td { 
+                            border: 1px solid #000 !important; 
+                            padding: 6px 4px !important; 
+                            font-size: 14px !important; 
+                            color: #000 !important; 
+                            font-weight: 500 !important;
+                            font-family: 'Segoe UI', Arial, sans-serif !important;
+                        }
+                        .header-titulos th { 
+                            background-color: #1b5e20 !important; 
+                            color: #ffffff !important; 
+                            font-size: 15px !important; 
+                            font-weight: bold !important;
+                            border: 2px solid #000 !important; 
+                        }
+                        .header-mes { 
+                            background-color: #eeeeee !important; 
+                            font-weight: bold !important; 
+                            border: 1px solid #000 !important; 
+                            text-transform: uppercase !important;
+                        }
+                        .linha-total-geral td { 
+                            background-color: #000000 !important; 
+                            color: #ffffff !important; 
+                            font-size: 16px !important; 
+                            font-weight: bold !important; 
+                        }
+                        .col-total-mes { background-color: #f1f8e9 !important; font-weight: bold !important; }
+                        tr:nth-child(even) { background-color: #f9f9f9; }
+                    `;
+                    clonedDoc.head.appendChild(style);
+
+                    // 2. Criar Cabeçalho Formal (Substituindo COMPLETAMENTE o cabeçalho do modal)
+                    const header = clonedDoc.createElement('div');
+                    header.style.cssText = "text-align: center; margin-bottom: 30px; border-bottom: 4px solid #1b5e20; padding-bottom: 15px; width: 100%;";
+                    header.innerHTML = `
+                        <h1 style="margin: 0; color: #1a252f; font-size: 32px; letter-spacing: 1px;">RELATÓRIO DE MONITORAMENTO - 30 DIAS</h1>
+                        <div style="margin-top: 10px; display: flex; justify-content: space-between; font-size: 16px; color: #444; font-weight: 600;">
+                            <span>SYSCONTROLE WEB v2.0</span>
+                            <span>EMISSÃO: ${dataHoraStr}</span>
+                        </div>
+                    `;
+                    
+                    // Remover qualquer cabeçalho original que possa ser capturado
+                    const modalHeader = clonedDoc.querySelector('.modal-header');
+                    if (modalHeader) {
+                        modalHeader.remove();
+                    }
+                    
+                    // Adicionar o cabeçalho novo no início do conteúdo
+                    if (clonedContent) {
+                        clonedContent.prepend(header);
+                    }
+
+                    // 3. Criar Rodapé de Autenticidade
+                    const footer = clonedDoc.createElement('div');
+                    footer.style.cssText = "margin-top: 30px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 12px; color: #999; text-align: right; font-style: italic; width: 100%;";
+                    footer.innerHTML = `Documento emitido digitalmente pelo sistema SysControle em ${dataHoraStr}. Todos os direitos reservados.`;
+                    if (clonedContent) {
+                        clonedContent.appendChild(footer);
+                    }
+
+                    // Ajustes de visibilidade
+                    if (clonedContainer) {
+                        clonedContainer.style.overflow = 'visible';
+                        clonedContainer.style.maxHeight = 'none';
+                        clonedContainer.style.height = 'auto';
+                        clonedContainer.style.width = '100%';
+                    }
+                    const infoBottom = clonedDoc.querySelector('.mes-info-bottom');
+                    if (infoBottom) infoBottom.style.display = 'none';
+                }
+            });
+
+            // 1. Download automático
+            const image = canvas.toDataURL("image/png");
+            const link = document.createElement('a');
+            const dataStr = agora.toLocaleDateString('pt-BR').replace(/\//g, '-');
+            const horaStr = agora.toLocaleTimeString('pt-BR').replace(/:/g, '-');
+            
+            link.download = `Relatorio_Monitoramento_${dataStr}_${horaStr}.png`;
+            link.href = image;
+            link.click();
+
+            // 2. Abrir em nova aba com estilo de Galeria de Relatório com Zoom Inteligente
+            const win = window.open();
+            if (win) {
+                win.document.write(`
+                    <html>
+                        <head>
+                            <title>Relatório Monitoramento - ${dataHoraStr}</title>
+                            <style>
+                                body { 
+                                    margin:0; 
+                                    background: #515659; 
+                                    display: flex; 
+                                    flex-direction: column; 
+                                    align-items: center; 
+                                    padding: 60px 20px 20px; 
+                                    font-family: 'Segoe UI', sans-serif; 
+                                }
+                                .toolbar { 
+                                    background: #323639; 
+                                    color: white; 
+                                    width: 100%; 
+                                    position: fixed; 
+                                    top: 0; 
+                                    left: 0; 
+                                    padding: 10px 20px; 
+                                    display: flex; 
+                                    justify-content: space-between; 
+                                    align-items: center; 
+                                    z-index: 100; 
+                                    box-shadow: 0 2px 10px rgba(0,0,0,0.3); 
+                                }
+                                .report-frame { 
+                                    background: white; 
+                                    box-shadow: 0 20px 60px rgba(0,0,0,0.6); 
+                                    border-radius: 2px;
+                                    cursor: zoom-in;
+                                    transition: transform 0.2s;
+                                    max-width: 100%;
+                                }
+                                .report-frame.zoomed {
+                                    cursor: zoom-out;
+                                    max-width: none;
+                                }
+                                img { 
+                                    display: block; 
+                                    width: 100%;
+                                    height: auto;
+                                }
+                                .report-frame.zoomed img {
+                                    width: auto;
+                                }
+                                .btn-action { 
+                                    background: #1b5e20; 
+                                    color: white; 
+                                    border: none; 
+                                    padding: 8px 15px; 
+                                    border-radius: 4px; 
+                                    cursor: pointer; 
+                                    font-weight: bold; 
+                                    margin-left: 10px;
+                                }
+                                .hint-zoom {
+                                    background: rgba(0,0,0,0.7);
+                                    color: white;
+                                    padding: 5px 15px;
+                                    border-radius: 20px;
+                                    font-size: 12px;
+                                    margin-bottom: 15px;
+                                    pointer-events: none;
+                                }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="toolbar">
+                                <span>📄 Relatório de Monitoramento 30 Dias (Alta Resolução)</span>
+                                <div>
+                                    <button class="btn-action" style="background: #444;" onclick="window.print()">Imprimir PDF</button>
+                                    <button class="btn-action" onclick="document.querySelector('.report-frame').classList.toggle('zoomed')">Alternar Zoom</button>
+                                </div>
+                            </div>
+                            <div class="hint-zoom">Dica: Clique na imagem para ver em tamanho real (Super Nítida)</div>
+                            <div class="report-frame" onclick="this.classList.toggle('zoomed')">
+                                <img src="${image}">
+                            </div>
+                        </body>
+                    </html>
+                `);
+                win.document.close();
+            }
+            
+            console.log('✅ Relatório Profissional gerado com sucesso!');
+        } catch (error) {
+            console.error('❌ Erro no relatório:', error);
+            alert('Houve um problema ao gerar o relatório profissional.');
+        } finally {
+            document.body.classList.remove('capturando-tabela');
+            container.style.maxHeight = originalMaxHeight;
+            container.style.overflow = originalOverflow;
+        }
+    }
+
     
     async exportarTabelaMes() {
         try {
@@ -10774,6 +11962,9 @@ class SysControleWeb {
         if (qtdFunc) {
             qtdFunc.textContent = `${visiveis} funcionários encontrados`;
         }
+        
+        // ⭐ Recalcular totais dinamicamente com base nas linhas visíveis
+        this.calcularTotaisPresenca();
     }
     
     // Limpar filtros de presença
@@ -10797,6 +11988,9 @@ class SysControleWeb {
         
         // Restaurar contador original
         this.atualizarContadorPresenca();
+        
+        // ⭐ Recalcular totais com todos os funcionários visíveis
+        this.calcularTotaisPresenca();
     }
     
     // Atualizar contador de funcionários na presença
@@ -10890,13 +12084,7 @@ class SysControleWeb {
             
             document.getElementById('modalHabilitarCursos').style.display = 'flex';
             
-            // Adicionar evento ESC para fechar
-            this.escHandler = (e) => {
-                if (e.key === 'Escape') {
-                    this.fecharHabilitarCursos();
-                }
-            };
-            document.addEventListener('keydown', this.escHandler);
+            document.getElementById('modalHabilitarCursos').style.display = 'flex';
         } catch (error) {
             console.error('Erro ao abrir habilitar cursos:', error);
             this.showToast('Erro ao carregar configurações de cursos', 'error');
@@ -10974,6 +12162,7 @@ class SysControleWeb {
             } else {
                 const errorData = await response.json().catch(() => ({}));
                 console.error('Erro na resposta do servidor:', errorData);
+                this.showToast('Erro ao salvar configurações no servidor!', 'error');
             }
         } catch (error) {
             console.error('Erro ao salvar cursos:', error);
@@ -11543,6 +12732,18 @@ class SysControleWeb {
         }
     }
     
+    iniciarAutoRefreshRastreamento() {
+        if (this.rastreamentoInterval) {
+            clearInterval(this.rastreamentoInterval);
+        }
+        this.rastreamentoInterval = setInterval(async () => {
+            const autoRefreshCheckbox = document.getElementById('rastreamentoAutoRefresh');
+            if (autoRefreshCheckbox && autoRefreshCheckbox.checked) {
+                await this.atualizarRastreamento();
+            }
+        }, 10000); // 10 segundos
+    }
+    
     async registrarEntradaSistema() {
         console.log('🔵 registrarEntradaSistema() chamado');
         
@@ -11667,10 +12868,13 @@ class SysControleWeb {
         try {
             console.log('🔄 Buscando dados de rastreamento...');
             
-            // Buscar total de usuários cadastrados
+            // Buscar usuários cadastrados
             const responseUsuarios = await fetch('/api/usuarios');
             const resultUsuarios = await responseUsuarios.json();
-            const totalUsuariosCadastrados = resultUsuarios.success ? resultUsuarios.data.filter(u => u.ativo).length : 0;
+            const listaUsuarios = resultUsuarios.success ? resultUsuarios.data : [];
+            const totalUsuariosCadastrados = listaUsuarios.filter(u => u.ativo).length;
+            this.usuariosCadastradosCache = listaUsuarios; // Cache para uso nas funções de renderização
+            
             console.log('👥 Total de usuários cadastrados ativos:', totalUsuariosCadastrados);
             
             const response = await fetch('/api/rastreamento/historico');
@@ -11680,25 +12884,41 @@ class SysControleWeb {
             const acessos = data.data || [];
             console.log('👥 Total de acessos:', acessos.length);
             
-            // Filtrar excluindo admin ANTES de contar
+            // Filtrar excluindo admin/master/Administrador ANTES de contar
             const acessosFiltrados = acessos.filter(a => {
-                return !(a.usuario_id === 1 || a.usuario?.toLowerCase() === 'admin');
+                return !(a.usuario_id === 1 || a.usuario?.toLowerCase() === 'admin' || a.usuario?.toLowerCase() === 'master' || a.usuario?.toLowerCase() === 'administrador');
             });
-            console.log('👥 Acessos após filtrar admin:', acessosFiltrados.length);
+            console.log('👥 Acessos após filtrar admin/master:', acessosFiltrados.length);
             
-            // CONTAR USUÁRIOS ÚNICOS, NÃO REGISTROS
-            const usuariosOnline = new Set(acessosFiltrados.filter(a => a.status === 'online').map(a => a.usuario));
-            const usuariosHoje = new Set(acessosFiltrados.filter(a => {
-                const dataEntrada = new Date(a.dataHoraEntrada);
-                const hoje = new Date();
-                return dataEntrada.toDateString() === hoje.toDateString();
-            }).map(a => a.usuario));
+            // CONTAR USUÁRIOS ÚNICOS ONLINE E ACESSOS DO DIA
+            const usuariosOnlineSet = new Set(
+                acessosFiltrados.filter(a => a.status === 'online')
+                                .map(a => a.usuario?.toLowerCase()?.trim())
+            );
             
-            const online = usuariosOnline.size;
-            const ausente = totalUsuariosCadastrados - online; // Total cadastrados MENOS online
-            const hoje = usuariosHoje.size;
+            const usuariosHojeSet = new Set(
+                acessosFiltrados.filter(a => {
+                    const dataEntrada = new Date(a.dataHoraEntrada);
+                    const hoje = new Date();
+                    return dataEntrada.toDateString() === hoje.toDateString();
+                }).map(a => a.usuario)
+            );
             
-            console.log('📈 Usuários - Total cadastrados:', totalUsuariosCadastrados, 'Online:', online, 'Ausente:', ausente, 'Acessaram hoje:', hoje);
+            const online = usuariosOnlineSet.size;
+            
+            // ✅ CÁLCULO REAL DE AUSENTES: Contar quantos usuários CADASTRADOS ATIVOS não estão online no momento!
+            const listaAtivos = listaUsuarios.filter(u => {
+                return u.ativo && !(u.id === 1 || u.login?.toLowerCase() === 'admin' || u.login?.toLowerCase() === 'master' || u.nome?.toLowerCase() === 'administrador');
+            });
+            const ausente = listaAtivos.filter(u => {
+                const loginNorm = u.login?.toLowerCase()?.trim();
+                const nomeNorm = u.nome?.toLowerCase()?.trim();
+                return !usuariosOnlineSet.has(loginNorm) && !usuariosOnlineSet.has(nomeNorm);
+            }).length;
+            
+            const hoje = usuariosHojeSet.size;
+            
+            console.log('📈 Métricas - Online:', online, 'Ausentes (reais):', ausente, 'Total Acessos Hoje:', hoje);
             
             document.getElementById('rastreamentoOnline').textContent = online;
             document.getElementById('rastreamentoAusente').textContent = ausente;
@@ -11726,41 +12946,138 @@ class SysControleWeb {
     
     renderizarTabelaRastreamento(acessos) {
         const tbody = document.getElementById('rastreamentoTableBody');
+        const usuariosCadastrados = this.usuariosCadastradosCache || [];
         
         // Filtrar excluindo administrador master
-        const acessosFiltrados = acessos.filter(a => {
+        let acessosFiltrados = acessos.filter(a => {
             return !(a.usuario_id === 1 || a.usuario?.toLowerCase() === 'admin');
         });
-        
-        // Agrupar por usuário (pegar apenas o acesso mais recente de cada usuário)
+
+        // FILTRO: Mostrar APENAS acessos de HOJE ou usuários ONLINE
+        const hojeStr = new Date().toDateString();
+        acessosFiltrados = acessosFiltrados.filter(a => {
+            const isHoje = new Date(a.dataHoraEntrada).toDateString() === hojeStr;
+            const isOnline = a.status === 'online';
+            return isHoje || isOnline;
+        });
+
+        // Agrupar por usuário (inicializando com todos os cadastrados válidos)
         const usuariosMap = new Map();
+        
+        // 1. Inicializar o mapa com todos os usuários cadastrados
+        usuariosCadastrados.forEach(u => {
+            // Ignorar se o usuário for inativo e mostrarOcultosRastreamento for falso
+            if (!this.mostrarOcultosRastreamento && !u.ativo) return;
+            
+            // Ignorar o usuário 'admin' genérico ou o Administrador master (ID 1, login 'master' ou nome 'Administrador')
+            if (u.id === 1 || u.login?.toLowerCase() === 'admin' || u.login?.toLowerCase() === 'master' || u.nome?.toLowerCase() === 'administrador') return;
+
+            const displayName = u.nome || u.login;
+            const key = displayName.toLowerCase().trim();
+            
+            usuariosMap.set(key, {
+                id: null,
+                usuario: displayName,
+                totalAcessos: 0,
+                primeiroAcesso: null,
+                dataHoraEntrada: null,
+                dataHoraSaida: null,
+                ultimoHeartbeat: null,
+                status: 'ausente',
+                ip: '-',
+                navegador: '-',
+                sistemaOperacional: '-'
+            });
+        });
+
+        // 2. Preencher com os dados reais de acessos filtrados
         acessosFiltrados.forEach(acesso => {
-            const usuario = acesso.usuario;
-            if (!usuariosMap.has(usuario)) {
-                usuariosMap.set(usuario, {
-                    ...acesso,
-                    totalAcessos: 1,
-                    primeiroAcesso: acesso.dataHoraEntrada
-                });
-            } else {
-                const existente = usuariosMap.get(usuario);
-                existente.totalAcessos++;
-                
-                // Manter o PRIMEIRO acesso (mais antigo)
-                if (new Date(acesso.dataHoraEntrada) < new Date(existente.primeiroAcesso)) {
-                    existente.primeiroAcesso = acesso.dataHoraEntrada;
+            const acessoUserLower = acesso.usuario?.toLowerCase()?.trim();
+            if (!acessoUserLower) return;
+
+            let key = acessoUserLower;
+            
+            // Tentar encontrar o usuário correspondente cadastrado para unificar as chaves
+            const correspondente = usuariosCadastrados.find(u => 
+                u.login?.toLowerCase()?.trim() === acessoUserLower || 
+                u.nome?.toLowerCase()?.trim() === acessoUserLower
+            );
+            
+            if (correspondente) {
+                key = (correspondente.nome || correspondente.login).toLowerCase().trim();
+            }
+
+            if (!usuariosMap.has(key)) {
+                // Ignorar se for inativo e mostrarOcultosRastreamento for falso
+                if (correspondente && !correspondente.ativo && !this.mostrarOcultosRastreamento) {
+                    return;
                 }
                 
-                // Atualizar status e última atividade se este acesso for mais recente
-                if (new Date(acesso.dataHoraEntrada) > new Date(existente.dataHoraEntrada)) {
-                    existente.status = acesso.status;
+                // Ignorar admin
+                if (acessoUserLower === 'admin') return;
+
+                const displayName = correspondente ? (correspondente.nome || correspondente.login) : acesso.usuario;
+                usuariosMap.set(key, {
+                    id: acesso.id,
+                    usuario: displayName,
+                    totalAcessos: 1,
+                    primeiroAcesso: acesso.dataHoraEntrada,
+                    dataHoraEntrada: acesso.dataHoraEntrada,
+                    dataHoraSaida: acesso.dataHoraSaida,
+                    ultimoHeartbeat: acesso.ultimoHeartbeat,
+                    status: acesso.status,
+                    ip: acesso.ip,
+                    navegador: acesso.navegador,
+                    sistemaOperacional: acesso.sistemaOperacional
+                });
+            } else {
+                const existente = usuariosMap.get(key);
+                
+                if (existente.totalAcessos === 0) {
+                    // Preencher o registro de usuário que não tinha acessos
+                    existente.id = acesso.id;
+                    existente.totalAcessos = 1;
+                    existente.primeiroAcesso = acesso.dataHoraEntrada;
+                    existente.dataHoraEntrada = acesso.dataHoraEntrada;
                     existente.dataHoraSaida = acesso.dataHoraSaida;
                     existente.ultimoHeartbeat = acesso.ultimoHeartbeat;
+                    existente.status = acesso.status;
+                    existente.ip = acesso.ip;
+                    existente.navegador = acesso.navegador;
+                    existente.sistemaOperacional = acesso.sistemaOperacional;
+                } else {
+                    existente.totalAcessos++;
+                    
+                    // Manter o PRIMEIRO acesso (mais antigo)
+                    if (new Date(acesso.dataHoraEntrada) < new Date(existente.primeiroAcesso)) {
+                        existente.primeiroAcesso = acesso.dataHoraEntrada;
+                    }
+                    
+                    // Atualizar status e última atividade se este acesso for mais recente
+                    if (new Date(acesso.dataHoraEntrada) > new Date(existente.dataHoraEntrada)) {
+                        existente.id = acesso.id;
+                        existente.status = acesso.status;
+                        existente.dataHoraSaida = acesso.dataHoraSaida;
+                        existente.ultimoHeartbeat = acesso.ultimoHeartbeat;
+                        existente.ip = acesso.ip;
+                        existente.navegador = acesso.navegador;
+                        existente.sistemaOperacional = acesso.sistemaOperacional;
+                    }
                 }
             }
         });
         
         const acessosAgrupados = Array.from(usuariosMap.values());
+        
+        // Ordenação: ONLINE primeiro, depois por nome
+        acessosAgrupados.sort((a, b) => {
+            const aOnline = a.status === 'online' ? 1 : 0;
+            const bOnline = b.status === 'online' ? 1 : 0;
+            if (aOnline !== bOnline) {
+                return bOnline - aOnline;
+            }
+            return a.usuario.localeCompare(b.usuario);
+        });
         
         console.log('👥 Total de usuários únicos:', acessosAgrupados.length);
         
@@ -11787,23 +13104,27 @@ class SysControleWeb {
         ];
         
         acessosAgrupados.forEach((acesso, index) => {
-            // Usar o PRIMEIRO acesso para mostrar a hora de entrada
-            const primeiroAcesso = new Date(acesso.primeiroAcesso || acesso.dataHoraEntrada);
-            const horaEntrada = primeiroAcesso.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            // Usar o PRIMEIRO acesso para mostrar a hora de entrada se existir
+            const primeiroAcesso = acesso.primeiroAcesso ? new Date(acesso.primeiroAcesso) : null;
+            const horaEntrada = primeiroAcesso ? primeiroAcesso.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '-';
             
             // Hora de saída (se houver)
             const horaSaida = acesso.dataHoraSaida ? new Date(acesso.dataHoraSaida).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '-';
             
             // Calcular duração desde o PRIMEIRO acesso
-            const diff = new Date() - primeiroAcesso;
-            const horas = Math.floor(diff / 3600000);
-            const minutos = Math.floor((diff % 3600000) / 60000);
-            const tempoOnline = `${horas}h ${minutos}m`;
+            let tempoOnline = '-';
+            if (primeiroAcesso) {
+                const diff = new Date() - primeiroAcesso;
+                const horas = Math.floor(diff / 3600000);
+                const minutos = Math.floor((diff % 3600000) / 60000);
+                const segundos = Math.floor((diff % 60000) / 1000);
+                tempoOnline = `${horas}h ${minutos}m ${segundos}s`;
+            }
             const cor = cores[index % cores.length];
             const isOnline = acesso.status === 'online';
             
             html += `
-                <tr style="border-bottom: 1px solid #f0f0f0;" data-acesso-id="${acesso.id}">
+                <tr style="border-bottom: 1px solid #f0f0f0;" data-acesso-id="${acesso.id || ''}">
                     <td style="padding: 10px;">
                         <span style="background: ${isOnline ? '#4caf50' : '#95a5a6'}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold;">
                             ${isOnline ? '🟢 ONLINE' : '⚪ AUSENTE'}
@@ -11811,7 +13132,7 @@ class SysControleWeb {
                     </td>
                     <td style="padding: 10px;">
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            <div style="width: 32px; height: 32px; background: ${cor}; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;">
+                            <div style="width: 32px; height: 32px; background: ${cor.bg}; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;">
                                 ${acesso.usuario.charAt(0).toUpperCase()}
                             </div>
                             <strong style="font-size: 13px;">${acesso.usuario}</strong>
@@ -11826,7 +13147,7 @@ class SysControleWeb {
                     <td style="padding: 10px; font-size: 12px;">${horaEntrada}</td>
                     <td style="padding: 10px; font-size: 12px;">${horaSaida}</td>
                     <td style="padding: 10px;">
-                        <span class="tempo-online" data-primeiro-acesso="${primeiroAcesso.getTime()}" style="background: #e3f2fd; color: #1565c0; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 600;">
+                        <span class="tempo-online" data-primeiro-acesso="${primeiroAcesso ? primeiroAcesso.getTime() : ''}" style="background: #e3f2fd; color: #1565c0; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 600;">
                             ${tempoOnline}
                         </span>
                     </td>
@@ -11840,34 +13161,203 @@ class SysControleWeb {
     }
     
     trocarAbaRastreamento(aba) {
-        // Atualizar botões
-        const abaOnline = document.getElementById('abaOnline');
-        const abaHistorico = document.getElementById('abaHistorico');
-        const conteudoOnline = document.getElementById('conteudoOnline');
-        const conteudoHistorico = document.getElementById('conteudoHistorico');
+        const abas = {
+            online: { btn: 'abaOnline', panel: 'conteudoOnline' },
+            historico: { btn: 'abaHistorico', panel: 'conteudoHistorico' },
+            auditoria: { btn: 'abaAuditoria', panel: 'conteudoAuditoria' }
+        };
         
-        if (aba === 'online') {
-            abaOnline.style.background = 'white';
-            abaOnline.style.color = '#667eea';
-            abaOnline.style.borderBottom = '3px solid #667eea';
-            abaHistorico.style.background = 'transparent';
-            abaHistorico.style.color = '#666';
-            abaHistorico.style.borderBottom = 'none';
-            conteudoOnline.style.display = 'block';
-            conteudoHistorico.style.display = 'none';
-        } else {
-            abaHistorico.style.background = 'white';
-            abaHistorico.style.color = '#667eea';
-            abaHistorico.style.borderBottom = '3px solid #667eea';
-            abaOnline.style.background = 'transparent';
-            abaOnline.style.color = '#666';
-            abaOnline.style.borderBottom = 'none';
-            conteudoHistorico.style.display = 'block';
-            conteudoOnline.style.display = 'none';
+        // Resetar estilos de todas as abas e exibir o painel correspondente
+        Object.entries(abas).forEach(([key, config]) => {
+            const btn = document.getElementById(config.btn);
+            const panel = document.getElementById(config.panel);
             
-            // Carregar histórico
+            if (btn && panel) {
+                if (key === aba) {
+                    btn.style.background = 'white';
+                    btn.style.color = '#667eea';
+                    btn.style.borderBottom = '3px solid #667eea';
+                    panel.style.display = 'block';
+                } else {
+                    btn.style.background = 'transparent';
+                    btn.style.color = '#666';
+                    btn.style.borderBottom = 'none';
+                    panel.style.display = 'none';
+                }
+            }
+        });
+        
+        // Gatilhos de inicialização de dados ao abrir a aba
+        if (aba === 'historico') {
             this.filtrarHistoricoRastreamento();
+        } else if (aba === 'auditoria') {
+            this.carregarLogsAuditoria();
         }
+    }
+    
+    async carregarLogsAuditoria() {
+        const tbody = document.getElementById('auditoriaTableBody');
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" style="text-align: center; padding: 60px; color: #64748b;">
+                        <div style="font-size: 48px; margin-bottom: 12px; animation: spin 2s linear infinite;">⏳</div>
+                        <div style="font-size: 15px; font-weight: 500;">Consultando registros no banco...</div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        try {
+            const response = await fetch('/api/auditoria');
+            const result = await response.json();
+            
+            if (result.success) {
+                this.logsAuditoriaCache = result.data || [];
+                this.filtrarLogsAuditoriaLocal();
+            } else {
+                throw new Error(result.message || 'Erro ao processar consulta');
+            }
+        } catch (error) {
+            console.error('❌ Erro ao carregar logs de auditoria:', error);
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 60px; color: #ef4444;">
+                            <div style="font-size: 48px; margin-bottom: 12px;">⚠️</div>
+                            <div style="font-size: 15px; font-weight: 600;">Falha ao carregar Histórico de Auditoria</div>
+                            <div style="font-size: 13px; margin-top: 5px; font-family: monospace; background: #fee2e2; display: inline-block; padding: 5px 10px; border-radius: 4px;">${error.message}</div>
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+    }
+
+    filtrarLogsAuditoriaLocal() {
+        const termo = document.getElementById('auditoriaBuscaTexto')?.value?.toLowerCase()?.trim() || '';
+        const usuario = document.getElementById('auditoriaBuscaUsuario')?.value?.toLowerCase()?.trim() || '';
+        const logs = this.logsAuditoriaCache || [];
+        
+        const filtrados = logs.filter(log => {
+            const matchTermo = !termo || 
+                log.acao?.toLowerCase().includes(termo) || 
+                log.detalhes?.toLowerCase().includes(termo);
+            const matchUsuario = !usuario || 
+                log.usuario?.toLowerCase().includes(usuario);
+            return matchTermo && matchUsuario;
+        });
+        
+        const contagem = document.getElementById('auditoriaContagem');
+        if (contagem) {
+            contagem.textContent = `Mostrando ${filtrados.length} de ${logs.length} logs`;
+        }
+        
+        this.renderizarLogsAuditoria(filtrados);
+    }
+
+    renderizarLogsAuditoria(logs) {
+        const tbody = document.getElementById('auditoriaTableBody');
+        if (!tbody) return;
+        
+        if (logs.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" style="text-align: center; padding: 50px; color: #94a3b8;">
+                        <div style="font-size: 40px; margin-bottom: 10px;">🔎</div>
+                        <div style="font-size: 14px; font-weight: 500;">Nenhum log de auditoria condiz com a busca.</div>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        const formatarData = (dataStr) => {
+            try {
+                if (!dataStr) return '-';
+                const d = new Date(dataStr);
+                if (isNaN(d.getTime())) return dataStr;
+                return d.toLocaleString('pt-BR', { 
+                    day: '2-digit', 
+                    month: '2-digit', 
+                    year: 'numeric', 
+                    hour: '2-digit', 
+                    minute: '2-digit', 
+                    second: '2-digit' 
+                });
+            } catch {
+                return dataStr;
+            }
+        };
+        
+        const getBadge = (acao) => {
+            const txt = acao ? acao.toLowerCase() : '';
+            let bg = '#64748b'; // Padrão cinza
+            
+            if (txt.includes('cadastrar') || txt.includes('criar')) bg = '#10b981'; 
+            else if (txt.includes('excluir') || txt.includes('deletar') || txt.includes('remover')) bg = '#ef4444'; 
+            else if (txt.includes('atualizar') || txt.includes('editar')) bg = '#3b82f6'; 
+            else if (txt.includes('inativar')) bg = '#f59e0b'; 
+            else if (txt.includes('ativar')) bg = '#84cc16'; 
+            
+            return `<span style="display: inline-block; padding: 6px 14px; border-radius: 20px; background: ${bg}; color: white; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">${acao}</span>`;
+        };
+
+        let html = '';
+        logs.forEach((log, index) => {
+            const zebra = index % 2 === 0 ? '#ffffff' : '#f8fafc';
+            
+            // Resumir UserAgent
+            let navShort = log.navegador || 'Local / API';
+            if (navShort.includes('Chrome/')) navShort = 'Chrome (Navegador)';
+            else if (navShort.includes('Firefox/')) navShort = 'Firefox (Navegador)';
+            else if (navShort.includes('Edg/')) navShort = 'Edge (Navegador)';
+            else if (navShort.length > 30) navShort = navShort.substring(0, 30) + '...';
+
+            // Cores para o IP e Ícone de Usuário
+            const initials = log.usuario ? log.usuario.charAt(0).toUpperCase() : '?';
+
+            let mainDetalhes = log.detalhes || '-';
+            let cellStyle = 'padding: 14px 15px; font-size: 13px; color: #334155; line-height: 1.5; font-weight: 500;';
+            let tooltipHTML = '';
+            let subtitleHTML = '';
+            
+            if (mainDetalhes.includes(' | Alterações: ')) {
+                const parts = mainDetalhes.split(' | Alterações: ');
+                mainDetalhes = parts[0];
+                const alteracoesStr = parts[1];
+                
+                // Format alterations with bullets and newlines for the browser title tooltip
+                const alteracoesTooltip = alteracoesStr.split(', ').join('\n• ');
+                
+                tooltipHTML = ` title="Detalhes das Alterações:\n• ${alteracoesTooltip}"`;
+                cellStyle += ' cursor: help; background: #f0fdf4; border-left: 3px solid #10b981;';
+                subtitleHTML = `<div style="font-size: 11px; color: #059669; margin-top: 4px; font-weight: 600;"><span style="display:inline-block; margin-right:4px;">📝</span>Passe o mouse para ver alterações</div>`;
+            }
+
+            html += `
+                <tr style="background: ${zebra}; border-bottom: 1px solid #e2e8f0; transition: all 0.15s ease-in-out;">
+                    <td style="padding: 14px 15px; font-size: 12px; color: #475569; font-weight: 600; font-family: monospace;">${formatarData(log.dataHora)}</td>
+                    <td style="padding: 14px 15px; font-size: 13px; color: #1e293b; font-weight: 600;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div style="width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%); display: flex; align-items: center; justify-content: center; font-size: 12px; color: white; font-weight: bold; text-shadow: 0 1px 1px rgba(0,0,0,0.2);">${initials}</div>
+                            <span>${log.usuario || 'Sistema'}</span>
+                        </div>
+                    </td>
+                    <td style="padding: 14px 15px; text-align: center;">${getBadge(log.acao)}</td>
+                    <td style="${cellStyle}"${tooltipHTML}>
+                        <div>${mainDetalhes}</div>
+                        ${subtitleHTML}
+                    </td>
+                    <td style="padding: 14px 15px; font-size: 11px; color: #64748b;">
+                        <div style="font-weight: 700; color: #334155; background: #f1f5f9; display: inline-block; padding: 2px 6px; border-radius: 4px; border: 1px solid #e2e8f0;">${log.ip || '127.0.0.1'}</div>
+                        <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; font-style: italic;" title="${log.navegador || ''}">${navShort}</div>
+                    </td>
+                </tr>
+            `;
+        });
+        
+        tbody.innerHTML = html;
     }
     
     async filtrarHistoricoRastreamento() {
@@ -11892,8 +13382,22 @@ class SysControleWeb {
     
     renderizarHistoricoRastreamento(acessos) {
         const tbody = document.getElementById('historicoTableBody');
+        const usuariosCadastrados = this.usuariosCadastradosCache || [];
         
-        if (acessos.length === 0) {
+        let acessosFiltrados = acessos;
+
+        // FILTRO DE ATIVOS/INATIVOS
+        if (!this.mostrarOcultosRastreamento) {
+            acessosFiltrados = acessos.filter(a => {
+                const usuarioCadastrado = usuariosCadastrados.find(u => 
+                    u.login.toLowerCase() === a.usuario.toLowerCase() || 
+                    u.nome.toLowerCase() === a.usuario.toLowerCase()
+                );
+                return usuarioCadastrado && usuarioCadastrado.ativo === true;
+            });
+        }
+        
+        if (acessosFiltrados.length === 0) {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="8" style="text-align: center; padding: 60px; color: #999;">
@@ -11907,7 +13411,7 @@ class SysControleWeb {
         
         // AGRUPAR POR USUÁRIO + DIA (1 linha por usuário por dia)
         const agrupados = new Map();
-        acessos.forEach(acesso => {
+        acessosFiltrados.forEach(acesso => {
             const data = new Date(acesso.dataHoraEntrada).toLocaleDateString('pt-BR');
             const chave = `${acesso.usuario}_${data}`;
             
@@ -11916,19 +13420,24 @@ class SysControleWeb {
                     ...acesso,
                     primeiraEntrada: acesso.dataHoraEntrada,
                     ultimaSaida: acesso.dataHoraSaida,
+                    ultimoAcessoData: acesso.dataHoraEntrada, // Usado para comparar o estado mais atual
                     totalAcessos: 1
                 });
             } else {
                 const existente = agrupados.get(chave);
                 existente.totalAcessos++;
-                // Manter a primeira entrada
+                // Manter a primeira entrada (mais antiga)
                 if (new Date(acesso.dataHoraEntrada) < new Date(existente.primeiraEntrada)) {
                     existente.primeiraEntrada = acesso.dataHoraEntrada;
                 }
-                // Manter a última saída
-                if (acesso.dataHoraSaida && (!existente.ultimaSaida || new Date(acesso.dataHoraSaida) > new Date(existente.ultimaSaida))) {
-                    existente.ultimaSaida = acesso.dataHoraSaida;
+                // 🟢 Se este acesso for o mais recente do dia, atualiza o status e dados de conexão ativos!
+                if (new Date(acesso.dataHoraEntrada) > new Date(existente.ultimoAcessoData)) {
+                    existente.ultimoAcessoData = acesso.dataHoraEntrada;
                     existente.status = acesso.status;
+                    existente.ultimaSaida = acesso.dataHoraSaida;
+                    existente.ip = acesso.ip;
+                    existente.navegador = acesso.navegador;
+                    existente.sistemaOperacional = acesso.sistemaOperacional;
                 }
             }
         });
@@ -11950,12 +13459,14 @@ class SysControleWeb {
                 const diff = new Date(acesso.ultimaSaida) - new Date(acesso.primeiraEntrada);
                 const horas = Math.floor(diff / 3600000);
                 const minutos = Math.floor((diff % 3600000) / 60000);
-                tempoOnline = `${horas}h ${minutos}m`;
+                const segundos = Math.floor((diff % 60000) / 1000);
+                tempoOnline = `${horas}h ${minutos}m ${segundos}s`;
             } else if (isOnline) {
                 const diff = new Date() - new Date(acesso.primeiraEntrada);
                 const horas = Math.floor(diff / 3600000);
                 const minutos = Math.floor((diff % 3600000) / 60000);
-                tempoOnline = `${horas}h ${minutos}m`;
+                const segundos = Math.floor((diff % 60000) / 1000);
+                tempoOnline = `${horas}h ${minutos}m ${segundos}s`;
             }
             
             html += `
@@ -12007,6 +13518,17 @@ class SysControleWeb {
             this.showToast('Erro ao zerar registros', 'error');
         }
     }
+
+    toggleOcultosRastreamento() {
+        this.mostrarOcultosRastreamento = !this.mostrarOcultosRastreamento;
+        const btn = document.getElementById('btnVerOcultos');
+        if (btn) {
+            btn.innerHTML = this.mostrarOcultosRastreamento ? '<span>👁️‍🗨️</span> Ocultar Inativos' : '<span>👁️</span> Ver Ocultos';
+            btn.style.background = this.mostrarOcultosRastreamento ? '#455a64' : '#607d8b';
+        }
+        this.atualizarRastreamento();
+        this.filtrarHistoricoRastreamento();
+    }
     
     verHistoricoRastreamento() {
         this.trocarAbaRastreamento('historico');
@@ -12055,6 +13577,269 @@ class SysControleWeb {
         } catch (err) {
             console.error('Erro ao inicializar histórico de pesquisa:', err);
         }
+    }
+    // ============ GERENCIAMENTO DE NÚMERO DE CONTROLE MANUAL (MODAL) ============
+    
+    // Debounce para salvar enquanto digita
+    timerSalvarNumero = null;
+
+    async verificarESalvarNumeroControle(nr, num, inputElement, debounced = false) {
+        if (!this.editingId) return;
+        
+        // Determinar a coluna de ano para este NR
+        const nrKey = nr.charAt(0).toUpperCase() + nr.slice(1).toLowerCase();
+        const colNumManual = `${nrKey}_NumControle`;
+        const colAnoManual = `${nrKey}_AnoControle`;
+
+        // Se debounced e campo vazio, ignorar (esperar o usuário terminar ou dar blur)
+        if (debounced && !num) return;
+
+        // Atualizar o cache local IMEDIATAMENTE para que o render não perca o que o usuário digitou
+        if (this.currentEditingData) {
+            this.currentEditingData[colNumManual] = num || '';
+        }
+
+        // Limpar timer anterior se houver
+        if (this.timerSalvarNumero) clearTimeout(this.timerSalvarNumero);
+
+        if (debounced) {
+            this.timerSalvarNumero = setTimeout(() => {
+                this.verificarESalvarNumeroControle(nr, num, inputElement, false);
+            }, 1000);
+            
+            // Renderizar preview instantaneamente
+            const renderMethod = `renderCert${nr.toUpperCase()}`;
+            if (typeof this[renderMethod] === 'function') this[renderMethod]();
+            return;
+        }
+
+        // Determinar o ANO: 
+        // 1. Tentar pegar do elemento de ano visível no certificado (se houver)
+        // 2. Tentar do cache local
+        // 3. Tentar da configuração
+        let ano = new Date().getFullYear();
+        const cfg = JSON.parse(localStorage.getItem(`cfg_${nr.toLowerCase()}`) || '{}');
+        
+        if (this.currentEditingData?.[colAnoManual]) {
+            ano = this.currentEditingData[colAnoManual];
+        } else if (cfg.ano_selecionado) {
+            ano = cfg.ano_selecionado;
+        }
+        
+        try {
+            const numeroFinal = num || '';
+
+            // 1. Verificar se o número já existe no servidor (se não estiver vazio)
+            if (numeroFinal) {
+                const response = await fetch(`/api/ssma/verificar-numero?nr=${nr}&ano=${ano}&num=${numeroFinal}&id=${this.editingId}`);
+                const result = await response.json();
+                
+                if (result.exists) {
+                    const mensagem = `ATENÇÃO: NÚMERO DE CONTROLE EM USO!\n\n` +
+                                     `O número ${numeroFinal} para o ano ${ano} (${nr.toUpperCase()}) já está cadastrado para outro funcionário:\n\n` +
+                                     `👉 ${result.name}\n\n` +
+                                     `O sistema não permitiu a gravação.`;
+                    
+                    if (inputElement) {
+                        this.mostrarImagemDuplicata('/Cadastro-ja-Existe.jpg', mensagem, inputElement);
+                    } else {
+                        if (typeof this.showToast === 'function') this.showToast(mensagem, 'error');
+                    }
+                    
+                    // Reverter localmente
+                    const valAnterior = await fetch(`/api/ssma/${this.editingId}`).then(r => r.json()).then(d => d[colNumManual]);
+                    if (inputElement) inputElement.value = valAnterior || '';
+                    if (this.currentEditingData) this.currentEditingData[colNumManual] = valAnterior || '';
+                    
+                    const renderMethod = `renderCert${nr.toUpperCase()}`;
+                    if (typeof this[renderMethod] === 'function') this[renderMethod]();
+                    return;
+                }
+            }
+            
+            // 2. Salvar no servidor
+            const updateResponse = await fetch(`/api/ssma/${this.editingId}/numero-controle`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nr, num: numeroFinal, ano })
+            });
+            
+            const upResult = await updateResponse.json();
+            console.log(`[Certificado] Resposta do Servidor (ID ${this.editingId}):`, upResult);
+
+            if (updateResponse.ok) {
+                if (this.currentEditingData) {
+                    this.currentEditingData[colNumManual] = numeroFinal;
+                    this.currentEditingData[colAnoManual] = ano;
+                }
+                
+                if (inputElement) {
+                    inputElement.style.borderColor = '#27ae60';
+                    setTimeout(() => { if (inputElement) inputElement.style.borderColor = 'rgba(255,255,255,0.2)'; }, 500);
+                }
+
+                const renderMethod = `renderCert${nr.toUpperCase()}`;
+                if (typeof this[renderMethod] === 'function') this[renderMethod]();
+                return true;
+            } else if (updateResponse.status === 409) {
+                const errorMsg = upResult.error || 'Número já em uso';
+                if (inputElement) {
+                    this.mostrarImagemDuplicata('/Cadastro-ja-Existe.jpg', `NÚMERO JÁ EM USO: ${errorMsg}`, inputElement);
+                } else {
+                    if (typeof this.showToast === 'function') this.showToast(`NÚMERO JÁ EM USO: ${errorMsg}`, 'error');
+                }
+                return false;
+            }
+            return false;
+        } catch (err) {
+            console.error('Erro ao verificar/salvar número:', err);
+            return false;
+        }
+    }
+
+    /**
+     * Captura um instantâneo (snapshot) de todos os valores atuais dos campos do formulário.
+     * @returns {Object} Objeto com os valores atuais.
+     */
+    getFormSnapshot() {
+        const snapshot = {};
+        const campos = [
+            'nome', 'empresa', 'funcao', 'celular', 'cpf', 'dataEmissao', 'vencimento', 'anotacoes',
+            'nr06_dataEmissao', 'nr06_vencimento', 'nr06_status', 'nr06_numControle', 'nr06_anoControle',
+            'nr10_dataEmissao', 'nr10_vencimento', 'nr10_status',
+            'nr11_dataEmissao', 'nr11_vencimento', 'nr11_status',
+            'nr12_dataEmissao', 'nr12_vencimento', 'nr12_status', 'nr12_numControle', 'nr12_anoControle', 'nr12_ferramenta',
+            'nr17_dataEmissao', 'nr17_vencimento', 'nr17_status', 'nr17_numControle', 'nr17_anoControle',
+            'nr18_dataEmissao', 'nr18_vencimento', 'nr18_status', 'nr18_numControle', 'nr18_anoControle',
+            'nr20_dataEmissao', 'nr20_vencimento', 'nr20_status', 'nr20_numControle', 'nr20_anoControle',
+            'nr33_dataEmissao', 'nr33_vencimento', 'nr33_status', 'nr33_numControle', 'nr33_anoControle',
+            'nr34_dataEmissao', 'nr34_vencimento', 'nr34_status',
+            'nr35_dataEmissao', 'nr35_vencimento', 'nr35_status', 'nr35_numControle', 'nr35_anoControle',
+            'epi_dataEmissao', 'epi_vencimento', 'epi_status', 'idField', 'status', 'genero', 'dataInativacao'
+        ];
+
+        campos.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                if (el.type === 'checkbox') snapshot[id] = el.checked;
+                else snapshot[id] = el.value || '';
+            }
+        });
+
+        // Ambientação
+        snapshot.ambientacao = document.querySelector('input[name="ambientacao"]:checked')?.value || 'N';
+        
+        // Checkboxes especiais
+        snapshot.nr06_validade2anos = document.getElementById('nr06_validade2anos')?.checked;
+        snapshot.epi_validade8meses = document.getElementById('epi_validade8meses')?.checked;
+
+        return JSON.stringify(snapshot);
+    }
+
+    /**
+     * Verifica se o formulário teve alterações não salvas.
+     */
+    isFormDirty() {
+        if (!this.formOriginalSnapshot) return false;
+        return this.getFormSnapshot() !== this.formOriginalSnapshot;
+    }
+
+    /**
+     * Reverte o formulário para os dados originais (últimos salvos).
+     */
+    reverterFormulario() {
+        if (this.currentEditingData) {
+            this.limparTodosOsCampos();
+            this.preencherFormulario(this.currentEditingData);
+            this.formOriginalSnapshot = this.getFormSnapshot();
+        }
+    }
+
+    /**
+     * Coleta os dados atuais do formulário em um formato compatível com o banco de dados.
+     * Usado para "Live Preview" de certificados e listas de presença.
+     */
+    getDadosAtuaisFormulario() {
+        if (!this.currentEditingData && !this.editingId) return null;
+
+        // Iniciar com os dados originais (para manter campos que não estão no formulário)
+        const d = { ...(this.currentEditingData || {}) };
+
+        // Sobrescrever com valores da tela
+        d.Nome = (document.getElementById('nome')?.value || '').toUpperCase();
+        d.Empresa = (document.getElementById('empresa')?.value || '').toUpperCase();
+        d.Funcao = (document.getElementById('funcao')?.value || '').toUpperCase();
+        d.Celular = document.getElementById('celular')?.value || '';
+        d.CPF = document.getElementById('cpf')?.value || '';
+        
+        // Auxiliar para datas
+        const toISO = (brDate) => {
+            if (!brDate) return null;
+            if (brDate.includes('T')) return brDate;
+            const parts = brDate.split('/');
+            if (parts.length !== 3) return null;
+            return `${parts[2]}-${parts[1]}-${parts[0]}T00:00:00.000Z`;
+        };
+
+        d.DataEmissao = toISO(document.getElementById('dataEmissao')?.value);
+        if (document.getElementById('vencimento')?.value) {
+            d.Vencimento = document.getElementById('vencimento')?.value;
+        }
+        d.Anotacoes = document.getElementById('anotacoes')?.value || '';
+        d.Status = document.getElementById('status')?.value || 'OK';
+        d.Ambientacao = document.querySelector('input[name="ambientacao"]:checked')?.value || 'N';
+
+        // NR-06
+        d.Nr06_DataEmissao = toISO(document.getElementById('nr06_dataEmissao')?.value);
+        if (document.getElementById('nr06_vencimento')?.value) d.Nr06_Vencimento = document.getElementById('nr06_vencimento')?.value;
+        d.Nr06_Status = document.getElementById('nr06_status')?.value || '';
+        d.Nr06_NumControle = document.getElementById('nr06_numControle')?.value || d.Nr06_NumControle;
+        d.Nr06_AnoControle = document.getElementById('nr06_anoControle')?.value || d.Nr06_AnoControle;
+        d.Nr06_Validade2Anos = document.getElementById('nr06_validade2anos')?.checked ? 1 : 0;
+
+        // NR-10
+        d.Nr10_DataEmissao = toISO(document.getElementById('nr10_dataEmissao')?.value);
+        if (document.getElementById('nr10_vencimento')?.value) d.Nr10_Vencimento = document.getElementById('nr10_vencimento')?.value;
+        d.Nr10_Status = document.getElementById('nr10_status')?.value || '';
+
+        // NR-12
+        d.Nr12_DataEmissao = toISO(document.getElementById('nr12_dataEmissao')?.value);
+        if (document.getElementById('nr12_vencimento')?.value) d.Nr12_Vencimento = document.getElementById('nr12_vencimento')?.value;
+        d.Nr12_Status = document.getElementById('nr12_status')?.value || '';
+        d.Nr12_Ferramenta = document.getElementById('nr12_ferramenta')?.value || '';
+
+        // NR-17
+        d.Nr17_DataEmissao = toISO(document.getElementById('nr17_dataEmissao')?.value);
+        if (document.getElementById('nr17_vencimento')?.value) d.Nr17_Vencimento = document.getElementById('nr17_vencimento')?.value;
+        d.Nr17_Status = document.getElementById('nr17_status')?.value || '';
+
+        // NR-18
+        d.Nr18_DataEmissao = toISO(document.getElementById('nr18_dataEmissao')?.value);
+        if (document.getElementById('nr18_vencimento')?.value) d.NR18_Vencimento = document.getElementById('nr18_vencimento')?.value;
+        d.Nr18_Status = document.getElementById('nr18_status')?.value || '';
+
+        // NR-20
+        d.Nr20_DataEmissao = toISO(document.getElementById('nr20_dataEmissao')?.value);
+        if (document.getElementById('nr20_vencimento')?.value) d.Nr20_Vencimento = document.getElementById('nr20_vencimento')?.value;
+        d.Nr20_Status = document.getElementById('nr20_status')?.value || '';
+
+        // NR-33
+        d.Nr33_DataEmissao = toISO(document.getElementById('nr33_dataEmissao')?.value);
+        if (document.getElementById('nr33_vencimento')?.value) d.NR33_Vencimento = document.getElementById('nr33_vencimento')?.value;
+        d.Nr33_Status = document.getElementById('nr33_status')?.value || '';
+
+        // NR-35
+        d.Nr35_DataEmissao = toISO(document.getElementById('nr35_dataEmissao')?.value);
+        if (document.getElementById('nr35_vencimento')?.value) d.NR35_Vencimento = document.getElementById('nr35_vencimento')?.value;
+        d.Nr35_Status = document.getElementById('nr35_status')?.value || '';
+
+        // EPI
+        d.Epi_DataEmissao = toISO(document.getElementById('epi_dataEmissao')?.value);
+        if (document.getElementById('epi_vencimento')?.value) d.epiVencimento = document.getElementById('epi_vencimento')?.value;
+        d.EpiStatus = document.getElementById('epi_status')?.value || '';
+        d.Epi_Validade8Meses = document.getElementById('epi_validade8meses')?.checked ? 1 : 0;
+
+        return d;
     }
 }
 

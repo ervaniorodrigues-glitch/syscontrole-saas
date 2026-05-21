@@ -4,6 +4,7 @@
 
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
@@ -11,13 +12,222 @@ const XLSX = require('xlsx');
 const ExcelJS = require('exceljs');
 const fs = require('fs');
 
+// Módulos SaaS Multi-Tenant
+const { tenantMiddleware, asyncLocalStorage } = require('./saas-middleware');
+const saasRoutes = require('./saas-routes');
+
+// ============ GLOBAL ERROR HANDLING ============
+process.on('uncaughtException', (err) => {
+    console.error('❌ CRITICAL: Uncaught Exception:', err);
+    // Em um ambiente de produção, poderíamos reiniciar o processo aqui,
+    // mas por enquanto apenas logamos para diagnosticar por que o "servidor está parando".
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+
+// ============ CONFIGURAÇÃO DE AMBIENTE / BANCO ============
+const DB_TYPE = process.env.DB_TYPE || 'sqlite'; // 'sqlite' ou 'postgres'
+console.log(`🔌 Tipo de Banco de Dados Detectado: ${DB_TYPE.toUpperCase()}`);
+
+// Configurações do PostgreSQL (SaaS / Web)
+const pgConfig = {
+    user: process.env.PG_USER || 'postgres',
+    host: process.env.PG_HOST || 'localhost',
+    database: process.env.PG_DATABASE || 'syscontrole',
+    password: process.env.PG_PASSWORD || 'sua_senha_aqui',
+    port: process.env.PG_PORT || 5432,
+    ssl: process.env.PG_SSL === 'true' ? { rejectUnauthorized: false } : false
+};
+
+const pool = DB_TYPE === 'postgres' ? new Pool(pgConfig) : null;
+const dbSqlite = DB_TYPE === 'sqlite' ? new sqlite3.Database(path.join(__dirname, 'syscontrole.db')) : null;
+
+// Camada de Abstração para queries (Compatível com Callbacks e Promises)
+const db = {
+    all: (sql, params = [], callback) => {
+        if (typeof params === 'function') {
+            callback = params;
+            params = [];
+        }
+        
+        const p = (async () => {
+            // Verificação do Tenant (Multi-tenant context)
+            const tenantDb = asyncLocalStorage.getStore();
+            if (tenantDb) {
+                return tenantDb.all(sql, params);
+            }
+
+            if (DB_TYPE === 'postgres') {
+                let pgSql = sql;
+                params.forEach((_, i) => pgSql = pgSql.replace('?', `$${i + 1}`));
+                const res = await pool.query(pgSql, params);
+                return res.rows;
+            } else {
+                return new Promise((resolve, reject) => {
+                    dbSqlite.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows));
+                });
+            }
+        })();
+
+        if (callback) {
+            p.then(rows => callback(null, rows)).catch(err => callback(err));
+        }
+        return p;
+    },
+    get: (sql, params = [], callback) => {
+        if (typeof params === 'function') {
+            callback = params;
+            params = [];
+        }
+
+        const p = (async () => {
+            // Verificação do Tenant (Multi-tenant context)
+            const tenantDb = asyncLocalStorage.getStore();
+            if (tenantDb) {
+                return tenantDb.get(sql, params);
+            }
+
+            if (DB_TYPE === 'postgres') {
+                let pgSql = sql;
+                params.forEach((_, i) => pgSql = pgSql.replace('?', `$${i + 1}`));
+                const res = await pool.query(pgSql, params);
+                return res.rows[0];
+            } else {
+                return new Promise((resolve, reject) => {
+                    dbSqlite.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
+                });
+            }
+        })();
+
+        if (callback) {
+            p.then(row => callback(null, row)).catch(err => callback(err));
+        }
+        return p;
+    },
+    run: function(sql, params = [], callback) {
+        if (typeof params === 'function') {
+            callback = params;
+            params = [];
+        }
+
+        const self = this;
+        const p = (async () => {
+            // Verificação do Tenant (Multi-tenant context)
+            const tenantDb = asyncLocalStorage.getStore();
+            if (tenantDb) {
+                return tenantDb.run(sql, params);
+            }
+
+            if (DB_TYPE === 'postgres') {
+                let pgSql = sql;
+                params.forEach((_, i) => pgSql = pgSql.replace('?', `$${i + 1}`));
+                const res = await pool.query(pgSql, params);
+                return { lastID: res.oid || null, changes: res.rowCount };
+            } else {
+                return new Promise((resolve, reject) => {
+                    dbSqlite.run(sql, params, function(err) {
+                        if (err) reject(err);
+                        else resolve({ lastID: this.lastID, changes: this.changes });
+                    });
+                });
+            }
+        })();
+
+        if (callback) {
+            p.then(result => {
+                // Simular o 'this' do sqlite3 para callbacks
+                callback.call(result, null);
+            }).catch(err => callback(err));
+        }
+        return p;
+    },
+    serialize: (fn) => {
+        const tenantDb = asyncLocalStorage.getStore();
+        if (tenantDb) {
+            return tenantDb.serialize(fn);
+        }
+        return (DB_TYPE === 'sqlite' ? dbSqlite.serialize(fn) : fn());
+    },
+    prepare: (sql) => {
+        if (DB_TYPE === 'sqlite') {
+            return dbSqlite.prepare(sql);
+        } else {
+            // No PostgreSQL, prepare é simulado ou usa a pool diretamente
+            // Para manter compatibilidade com stmt.run/finalize, retornaríamos um mock
+            // mas o foco atual é SQLite onde o problema ocorre.
+            return {
+                run: async (params, cb) => {
+                    try {
+                        let pgSql = sql;
+                        params.forEach((_, i) => pgSql = pgSql.replace('?', `$${i + 1}`));
+                        await pool.query(pgSql, params);
+                        if (cb) cb(null);
+                    } catch (err) {
+                        if (cb) cb(err);
+                    }
+                },
+                finalize: (cb) => { if (cb) cb(null); }
+            };
+        }
+    },
+    close: (callback) => {
+        if (DB_TYPE === 'sqlite') dbSqlite.close(callback);
+        else pool.end().then(() => callback && callback()).catch(err => callback && callback(err));
+    }
+};
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Configurar middlewares
+app.use((req, res, next) => {
+    console.log(`[REQ] ${req.method} ${req.url}`);
+    next();
+});
 app.use(cors());
 app.use(express.json({ limit: '300mb' })); // Aumentar limite para aceitar backups grandes com fotos
 app.use(express.urlencoded({ limit: '300mb', extended: true }));
+
+// Integrar middlewares do SaaS Multi-Tenant
+app.use(tenantMiddleware); // Isola os bancos de dados por inquilino (tenant)
+app.use('/api/saas', saasRoutes); // Rotas do SaaS (Login, Registro, Gestão)
+app.use((req, res, next) => {
+    if (req.path.endsWith('.js') || req.path.endsWith('.css') || req.path.endsWith('.html') || req.path === '/' || req.path === '') {
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
+    }
+    next();
+});
+
+app.use('/Imagens', express.static(path.join(__dirname, 'Imagens')));
+app.use(express.static('public')); // Garantir que a pasta public seja servida
+
+
+// Função global para normalizar texto (Remover acentos e caracteres especiais, converter para MAIÚSCULO)
+const normalizarTexto = (texto) => {
+    if (!texto) return '';
+    let val = texto.toString();
+
+    // Reparar mojibake comum antes de normalizar
+    val = val.replace(/JO[\uFFFD]+O/g, 'JOAO');
+    val = val.replace(/GON[\uFFFD]+ALVES/g, 'GONCALVES');
+    val = val.replace(/T[\uFFFD]+CNICO/g, 'TECNICO');
+    val = val.replace(/JOS[\uFFFD]+/g, 'JOSE');
+    val = val.replace(/EDIFICA[\uFFFD]+ES/g, 'EDIFICACOES');
+    val = val.replace(/CONCEI[\uFFFD]+O/g, 'CONCEICAO');
+
+    return val
+        .normalize('NFD') // Decompõe caracteres acentuados
+        .replace(/[\u0300-\u036f]/g, '') // Remove os acentos
+        .replace(/\uFFFD/g, '') // Remove caractere de erro 
+        .replace(/[^\x00-\x7F]/g, '') // Remove qualquer outro caractere não-ASCII (Garante limpeza total)
+        .toUpperCase()
+        .trim();
+};
 
 // ============ CONTROLE DE PRESENÇA EM MEMÓRIA ============
 // Estrutura: { mesAno: { funcionarioId: { dia: status } } }
@@ -75,18 +285,100 @@ function salvarDadosPresenca() {
     }
 }
 
+// Salvar dados no banco de dados (Migração progressiva)
+async function migrarJSONParaSQLite() {
+    console.log('🚀 Iniciando verificação de migração JSON -> SQLite...');
+    try {
+        const mesAnoAtual = getMesAnoAtual();
+        
+        // Carregar do arquivo se existir
+        if (fs.existsSync(PRESENCA_FILE)) {
+            const dataFile = JSON.parse(fs.readFileSync(PRESENCA_FILE, 'utf8'));
+            const dadosMes = dataFile.presenca ? dataFile.presenca[mesAnoAtual] || {} : {};
+            const comentariosMes = dataFile.comentarios ? dataFile.comentarios[mesAnoAtual] || {} : {};
+            
+            // Verificar se o banco já tem dados desse mês
+            const check = await db.get("SELECT COUNT(*) as count FROM PRESENCA_MES_ATUAL WHERE mesAno = ?", [mesAnoAtual]);
+            if (check.count === 0 && Object.keys(dadosMes).length > 0) {
+                console.log(`📦 Migrando ${Object.keys(dadosMes).length} registros de presença para o banco...`);
+                for (const funcId of Object.keys(dadosMes)) {
+                    for (const dia of Object.keys(dadosMes[funcId])) {
+                        const info = dadosMes[funcId][dia];
+                        await db.run(
+                            "INSERT INTO PRESENCA_MES_ATUAL (mesAno, funcionarioId, dia, status, isFolga, dataCriacao, dataAtualizacao) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+                            [mesAnoAtual, parseInt(funcId), parseInt(dia), info.status, info.isFolga ? 1 : 0]
+                        );
+                    }
+                }
+                
+                console.log(`💬 Migrando ${Object.keys(comentariosMes).length} comentários para o banco...`);
+                for (const chave of Object.keys(comentariosMes)) {
+                    const [funcId, dia] = chave.split('_');
+                    const com = comentariosMes[chave];
+                    await db.run(
+                        "INSERT INTO COMENTARIOS_PRESENCA (mesAno, funcionarioId, dia, texto, dataCriacao) VALUES (?, ?, ?, ?, ?)",
+                        [mesAnoAtual, parseInt(funcId), parseInt(dia), com.texto, com.data]
+                    );
+                }
+                console.log('✅ Migração concluída!');
+                await registrarLog('Sistema', 'Migração', `Migrados dados de ${mesAnoAtual} do JSON para o SQLite`);
+            }
+        }
+    } catch (err) {
+        console.error('❌ Erro na migração:', err);
+    }
+}
+
+// LOG DE AUDITORIA CENTRALIZADO E ROBUSTO
+async function registrarLog(reqOrUser, acao, detalhes = '') {
+    try {
+        let usuario = 'Sistema';
+        let ip = '';
+        let navegador = '';
+        
+        if (reqOrUser && reqOrUser.headers) {
+            const usuarioRaw = reqOrUser.headers['x-user-name'] || 'Desconhecido';
+            usuario = decodeURIComponent(usuarioRaw);
+            ip = reqOrUser.ip || reqOrUser.headers['x-forwarded-for'] || reqOrUser.connection?.remoteAddress || '';
+            navegador = reqOrUser.headers['user-agent'] || '';
+        } else if (typeof reqOrUser === 'string') {
+            usuario = reqOrUser;
+        }
+        
+        const sql = `
+            INSERT INTO AUDIT_LOG (usuario, acao, detalhes, ip, navegador, dataHora)
+            VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))
+        `;
+        
+        await db.run(sql, [usuario, acao, detalhes, ip, navegador]);
+    } catch (err) {
+        console.error('❌ Falha ao gravar log de auditoria:', err.message);
+    }
+}
+
+// Criar tabela de auditoria se não existir (fallback)
+db.run(`CREATE TABLE IF NOT EXISTS AUDIT_LOG (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario TEXT,
+    acao TEXT,
+    detalhes TEXT,
+    ip TEXT,
+    navegador TEXT,
+    dataHora DATETIME DEFAULT CURRENT_TIMESTAMP
+)`);
+db.run(`ALTER TABLE AUDIT_LOG ADD COLUMN ip TEXT`, () => {});
+db.run(`ALTER TABLE AUDIT_LOG ADD COLUMN navegador TEXT`, () => {});
+
 // Carregar dados ao iniciar o servidor
 carregarDadosPresenca();
+migrarJSONParaSQLite();
 
-// Salvar dados periodicamente (a cada 30 segundos)
+// Salvar dados periodicamente (a cada 30 segundos) - Mantido por enquanto para retrocompatibilidade
 setInterval(salvarDadosPresenca, 30000);
 
 // Salvar dados ao encerrar o servidor
-process.on('SIGINT', () => {
-    console.log('💾 Salvando dados de presença antes de encerrar...');
-    salvarDadosPresenca();
-    process.exit(0);
-});
+// O handler consolidado está no final do arquivo.
+
 
 function getMesAnoAtual() {
     const hoje = new Date();
@@ -194,7 +486,7 @@ async function salvarHistoricoPresenca(mesAno) {
                         func.id,
                         func.Nome,
                         func.Empresa,
-                        func.Funcao,
+                        func.Funcao ? func.Funcao.normalize('NFC').trim() : '',
                         func.Situacao,
                         JSON.stringify(presencaFunc),
                         JSON.stringify(comentariosFunc)
@@ -357,10 +649,7 @@ setInterval(verificarBackupAutomatico, 60 * 60 * 1000);
 setTimeout(verificarBackupAutomatico, 5000);
 // =========================================================
 
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// Middleware já configurado no início do arquivo (300mb para suportar backups com fotos)
 
 // ============ SISTEMA DE AUTENTICAÇÃO ============
 // Arquivo de usuários
@@ -401,7 +690,7 @@ app.post('/api/auth/login', (req, res) => {
     );
     
     if (usuario) {
-        res.json({ 
+        return res.json({ 
             success: true, 
             user: { 
                 id: usuario.id, 
@@ -410,8 +699,48 @@ app.post('/api/auth/login', (req, res) => {
                 tipo: usuario.tipo 
             } 
         });
-    } else {
-        res.json({ success: false, message: 'Login ou senha incorretos' });
+    }
+
+    // 🚀 FALLBACK PARA SAAS MULTI-TENANT EM CASO DE CACHE NO BROWSER!
+    try {
+        const { masterDb } = require('./saas-config');
+        masterDb.get(`
+            SELECT u.*, t.nome_empresa, t.ativo as tenant_ativo, t.plano, t.data_expiracao
+            FROM usuarios_globais u
+            JOIN tenants t ON u.tenant_id = t.id
+            WHERE LOWER(u.login) = LOWER(?) AND u.senha = ?
+        `, [login, senha], (err, row) => {
+            if (err || !row) {
+                return res.json({ success: false, message: 'Login ou senha incorretos' });
+            }
+            
+            // Verificar se tenant está ativo
+            if (row.tenant_ativo === 0) {
+                return res.status(401).json({ success: false, message: 'Empresa desativada. Contate o suporte.' });
+            }
+            
+            console.log(`🔐 Autenticação SaaS realizada via Fallback legada para: ${login}`);
+            
+            // Registrar atividade online
+            global.activeTenants = global.activeTenants || {};
+            global.activeTenants[row.tenant_id] = Date.now();
+
+            return res.json({
+                success: true,
+                user: {
+                    id: row.id,
+                    tenant_id: row.tenant_id,
+                    login: row.login,
+                    nome: row.nome,
+                    tipo: row.tipo,
+                    empresa: row.nome_empresa,
+                    plano: row.plano
+                }
+            });
+        });
+    } catch (e) {
+        console.error('Erro no fallback de autenticação SaaS:', e);
+        return res.json({ success: false, message: 'Login ou senha incorretos' });
     }
 });
 
@@ -420,94 +749,153 @@ app.get('/api/auth/check', (req, res) => {
     res.json({ success: true });
 });
 
-// Listar usuários (só master)
+// Listar usuários (só master - Isolado por Tenant)
 app.get('/api/usuarios', (req, res) => {
-    const lista = usuariosData.usuarios.map(u => ({
-        id: u.id,
-        login: u.login,
-        nome: u.nome,
-        tipo: u.tipo,
-        ativo: u.ativo
-    }));
-    res.json({ success: true, data: lista });
+    db.all('SELECT id, login, senha, nome, tipo, ativo FROM USUARIOS_TENANT', [], (err, rows) => {
+        if (err) {
+            console.error('Erro ao listar usuários do tenant:', err);
+            return res.status(500).json({ success: false, message: 'Erro ao carregar usuários.' });
+        }
+        
+        const lista = rows.map(u => ({
+            id: u.id,
+            login: u.login,
+            senha: u.senha,
+            nome: u.nome,
+            tipo: u.tipo,
+            ativo: u.ativo === 1 || u.ativo === true || u.ativo === 'true'
+        }));
+        
+        res.json({ success: true, data: lista });
+    });
 });
 
-// Criar usuário (só master)
-app.post('/api/usuarios', (req, res) => {
+// Criar usuário (só master - Isolado por Tenant)
+app.post('/api/usuarios', async (req, res) => {
     const { login, senha, nome, tipo } = req.body;
     
     if (!login || !senha || !nome) {
         return res.json({ success: false, message: 'Preencha todos os campos' });
     }
     
-    const existe = usuariosData.usuarios.find(u => u.login.toLowerCase() === login.toLowerCase());
-    if (existe) {
-        return res.json({ success: false, message: 'Login já existe' });
+    try {
+        const row = await db.get('SELECT id FROM USUARIOS_TENANT WHERE LOWER(login) = LOWER(?)', [login]);
+        if (row) {
+            return res.json({ success: false, message: 'Login já existe nesta empresa' });
+        }
+        
+        await db.run(
+            'INSERT INTO USUARIOS_TENANT (login, senha, nome, tipo, ativo) VALUES (?, ?, ?, ?, 1)',
+            [login, senha, nome, tipo || 'comum']
+        );
+        
+        await registrarLog(req, 'Criar Usuário', `Cadastrou o usuário [${nome}] (login: ${login}, nível: ${tipo || 'comum'})`);
+        res.json({ success: true, message: 'Usuário criado com sucesso' });
+    } catch (err) {
+        console.error('Erro ao criar usuário no tenant:', err);
+        res.status(500).json({ success: false, message: 'Erro ao criar usuário.' });
     }
-    
-    const novoId = Math.max(...usuariosData.usuarios.map(u => u.id), 0) + 1;
-    usuariosData.usuarios.push({
-        id: novoId,
-        login: login,
-        senha: senha,
-        nome: nome,
-        tipo: tipo || 'comum',
-        ativo: true
-    });
-    
-    salvarUsuarios(usuariosData);
-    res.json({ success: true, message: 'Usuário criado com sucesso' });
 });
 
-// Atualizar usuário (só master)
-app.put('/api/usuarios/:id', (req, res) => {
+// Atualizar usuário (só master - Isolado por Tenant)
+app.put('/api/usuarios/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     const { login, senha, nome, tipo, ativo } = req.body;
     
-    const usuario = usuariosData.usuarios.find(u => u.id === id);
-    if (!usuario) {
-        return res.json({ success: false, message: 'Usuário não encontrado' });
+    try {
+        const usuario = await db.get('SELECT * FROM USUARIOS_TENANT WHERE id = ?', [id]);
+        if (!usuario) {
+            return res.json({ success: false, message: 'Usuário não encontrado' });
+        }
+        
+        if (id === 1) {
+            if (tipo && tipo !== 'master') {
+                return res.json({ success: false, message: 'Não é permitido alterar o nível de acesso do usuário proprietário (Protegido)' });
+            }
+            if (ativo !== undefined && !ativo) {
+                return res.json({ success: false, message: 'Não é permitido desativar o usuário proprietário (Protegido)' });
+            }
+        }
+        
+        const nLogin = login || usuario.login;
+        const nSenha = senha || usuario.senha;
+        const nNome = nome || usuario.nome;
+        const nTipo = tipo || usuario.tipo;
+        const nAtivo = ativo !== undefined ? (ativo ? 1 : 0) : usuario.ativo;
+        
+        await db.run(
+            'UPDATE USUARIOS_TENANT SET login = ?, senha = ?, nome = ?, tipo = ?, ativo = ? WHERE id = ?',
+            [nLogin, nSenha, nNome, nTipo, nAtivo, id]
+        );
+        
+        let acaoDesc = 'Atualizar Usuário';
+        let detalhes = `Atualizou dados do usuário [${nNome}]`;
+        
+        if (ativo !== undefined && (ativo ? 1 : 0) !== usuario.ativo) {
+            acaoDesc = ativo ? 'Ativar Usuário' : 'Inativar Usuário';
+            detalhes = `${ativo ? 'Ativou' : 'Inativou'} o acesso do usuário [${nNome}]`;
+        }
+        
+        await registrarLog(req, acaoDesc, detalhes);
+        res.json({ success: true, message: 'Usuário atualizado' });
+    } catch (err) {
+        console.error('Erro ao atualizar usuário no tenant:', err);
+        res.json({ success: false, message: 'Erro ao atualizar usuário.' });
     }
-    
-    if (login) usuario.login = login;
-    if (senha) usuario.senha = senha;
-    if (nome) usuario.nome = nome;
-    if (tipo) usuario.tipo = tipo;
-    if (ativo !== undefined) usuario.ativo = ativo;
-    
-    salvarUsuarios(usuariosData);
-    res.json({ success: true, message: 'Usuário atualizado' });
 });
 
-// Excluir usuário (só master)
-app.delete('/api/usuarios/:id', (req, res) => {
+// Excluir usuário (só master - Isolado por Tenant)
+app.delete('/api/usuarios/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     
-    if (id === 1) {
-        return res.json({ success: false, message: 'Não é possível excluir o usuário master principal' });
+    try {
+        const row = await db.get('SELECT nome, tipo FROM USUARIOS_TENANT WHERE id = ?', [id]);
+        if (!row) {
+            return res.json({ success: false, message: 'Usuário não encontrado' });
+        }
+        
+        if (id === 1) {
+            return res.json({ success: false, message: 'Não é permitido excluir o usuário proprietário (Protegido)' });
+        }
+        
+        await db.run('DELETE FROM USUARIOS_TENANT WHERE id = ?', [id]);
+        await registrarLog(req, 'Excluir Usuário', `Excluiu permanentemente o usuário [${row.nome}]`);
+        res.json({ success: true, message: 'Usuário excluído com sucesso!' });
+    } catch (err) {
+        console.error('❌ Erro interno ao excluir usuário:', err);
+        res.json({ success: false, message: 'Erro ao excluir usuário do banco de dados.' });
     }
-    
-    usuariosData.usuarios = usuariosData.usuarios.filter(u => u.id !== id);
-    salvarUsuarios(usuariosData);
-    res.json({ success: true, message: 'Usuário excluído' });
+});
+
+// GET - Buscar logs de auditoria (Histórico de Ações)
+app.get('/api/auditoria', async (req, res) => {
+    try {
+        const rows = await db.all('SELECT * FROM AUDIT_LOG ORDER BY dataHora DESC LIMIT 1000');
+        res.json({ success: true, data: rows || [] });
+    } catch (err) {
+        console.error('Erro ao buscar logs de auditoria:', err);
+        res.status(500).json({ success: false, message: 'Erro ao carregar logs.' });
+    }
 });
 
 // ==================== ROTAS DE RASTREAMENTO ====================
 
-// POST - Registrar entrada no sistema
+// POST - Registrar entrada no sistema (Centralizado no GlobalDB isolado por tenant)
 app.post('/api/rastreamento/entrada', (req, res) => {
     const { usuario, ip, navegador, sistemaOperacional } = req.body;
-    
+    const tenantId = req.tenantId || 'ervanio-1234';
+
     const sql = `
-        INSERT INTO RASTREAMENTO_ACESSOS (usuario, ip, navegador, sistemaOperacional, status, dataHoraEntrada, lastHeartbeat)
-        VALUES (?, ?, ?, ?, 'online', datetime('now', 'localtime'), datetime('now', 'localtime'))
+        INSERT INTO RASTREAMENTO_ACESSOS (usuario, tenant_id, ip, navegador, sistemaOperacional, status, dataHoraEntrada, lastHeartbeat)
+        VALUES (?, ?, ?, ?, ?, 'online', datetime('now', 'localtime'), datetime('now', 'localtime'))
     `;
     
-    db.run(sql, [usuario, ip, navegador, sistemaOperacional], function(err) {
+    dbSqlite.run(sql, [usuario, tenantId, ip, navegador, sistemaOperacional], function(err) {
         if (err) {
+            console.error('Erro ao registrar entrada de rastreamento:', err);
             return res.status(500).json({ error: err.message });
         }
-        console.log(`✅ Entrada registrada: ${usuario} (ID: ${this.lastID})`);
+        console.log(`✅ Entrada registrada: ${usuario} no tenant ${tenantId} (ID: ${this.lastID})`);
         res.json({ success: true, id: this.lastID });
     });
 });
@@ -522,10 +910,8 @@ app.put('/api/rastreamento/saida/:id', (req, res) => {
         WHERE id = ?
     `;
     
-    db.run(sql, [id], (err) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    dbSqlite.run(sql, [id], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true });
     });
 });
@@ -540,11 +926,8 @@ app.put('/api/rastreamento/heartbeat/:id', (req, res) => {
         WHERE id = ? AND status = 'online'
     `;
     
-    db.run(sql, [id], (err) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
-        console.log(`💓 Heartbeat recebido do ID ${id}`);
+    dbSqlite.run(sql, [id], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true });
     });
 });
@@ -555,40 +938,39 @@ app.post('/api/rastreamento/saida/:id', (req, res) => {
     
     const sql = `
         UPDATE RASTREAMENTO_ACESSOS 
-        SET dataHoraSaida = CURRENT_TIMESTAMP, status = 'ausente'
+        SET dataHoraSaida = datetime('now', 'localtime'), status = 'ausente'
         WHERE id = ?
     `;
     
-    db.run(sql, [id], (err) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    dbSqlite.run(sql, [id], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true });
     });
 });
 
-// GET - Listar acessos online (tempo real)
+// GET - Listar acessos online (tempo real, filtrado por tenant)
 app.get('/api/rastreamento/online', (req, res) => {
+    const tenantId = req.tenantId || 'ervanio-1234';
+    
     const sql = `
         SELECT * FROM RASTREAMENTO_ACESSOS 
-        WHERE status = 'online'
+        WHERE status = 'online' AND tenant_id = ?
         ORDER BY dataHoraEntrada DESC
     `;
     
-    db.all(sql, [], (err, rows) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    dbSqlite.all(sql, [tenantId], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
         res.json({ data: rows || [] });
     });
 });
 
-// GET - Listar histórico completo de acessos
+// GET - Listar histórico completo de acessos (filtrado por tenant)
 app.get('/api/rastreamento/historico', (req, res) => {
     const { dataInicio, dataFim, usuario } = req.query;
+    const tenantId = req.tenantId || 'ervanio-1234';
     
-    let sql = `SELECT * FROM RASTREAMENTO_ACESSOS WHERE 1=1`;
-    let params = [];
+    let sql = `SELECT * FROM RASTREAMENTO_ACESSOS WHERE tenant_id = ?`;
+    let params = [tenantId];
     
     if (dataInicio) {
         sql += ` AND DATE(dataHoraEntrada) >= DATE(?)`;
@@ -607,45 +989,41 @@ app.get('/api/rastreamento/historico', (req, res) => {
     
     sql += ` ORDER BY dataHoraEntrada DESC LIMIT 1000`;
     
-    db.all(sql, params, (err, rows) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    dbSqlite.all(sql, params, (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
         res.json({ data: rows || [] });
     });
 });
 
-// PUT - Marcar todos como ausente (limpeza)
+// PUT - Marcar todos como ausente (limpeza isolada por tenant)
 app.put('/api/rastreamento/limpar-online', (req, res) => {
+    const tenantId = req.tenantId || 'ervanio-1234';
     const sql = `
         UPDATE RASTREAMENTO_ACESSOS 
-        SET status = 'ausente', dataHoraSaida = CURRENT_TIMESTAMP
-        WHERE status = 'online' AND dataHoraSaida IS NULL
+        SET status = 'ausente', dataHoraSaida = datetime('now', 'localtime')
+        WHERE status = 'online' AND dataHoraSaida IS NULL AND tenant_id = ?
     `;
     
-    db.run(sql, [], (err) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    dbSqlite.run(sql, [tenantId], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
         res.json({ success: true });
     });
 });
 
-// DELETE - Limpar TODO o histórico de rastreamento
+// DELETE - Limpar TODO o histórico de rastreamento (isolado por tenant)
 app.delete('/api/rastreamento/limpar-tudo', (req, res) => {
-    const sql = `DELETE FROM RASTREAMENTO_ACESSOS`;
+    const tenantId = req.tenantId || 'ervanio-1234';
+    const sql = `DELETE FROM RASTREAMENTO_ACESSOS WHERE tenant_id = ?`;
     
-    db.run(sql, [], (err) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
-        console.log('🗑️ Histórico de rastreamento limpo!');
+    dbSqlite.run(sql, [tenantId], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        console.log(`🗑️ Histórico de rastreamento do tenant ${tenantId} limpo!`);
         res.json({ success: true, message: 'Histórico limpo com sucesso' });
     });
 });
 
 // Limpeza automática: marcar como ausente acessos online há mais de 1 minuto sem heartbeat
-const limparAcessosAntigos = () => {
+const limparAcessosAntigos = async () => {
     const sql = `
         UPDATE RASTREAMENTO_ACESSOS 
         SET status = 'ausente', dataHoraSaida = datetime('now', 'localtime')
@@ -654,20 +1032,21 @@ const limparAcessosAntigos = () => {
         AND (julianday(datetime('now', 'localtime')) - julianday(lastHeartbeat)) * 24 * 60 > 1
     `;
     
-    db.run(sql, [], function(err) {
-        if (err) {
-            console.error('❌ Erro na limpeza automática:', err);
-        } else if (this.changes > 0) {
-            console.log(`🧹 Limpeza automática: ${this.changes} usuário(s) marcado(s) como ausente`);
+    try {
+        const result = await db.run(sql);
+        if (result.changes > 0) {
+            console.log(`🧹 Limpeza automática: ${result.changes} usuário(s) marcado(s) como ausente`);
         }
-    });
+    } catch (err) {
+        console.error('❌ Erro na limpeza automática:', err);
+    }
 };
 
-// Executar limpeza ao iniciar (MOVIDO PARA DEPOIS DA INICIALIZAÇÃO DO BANCO)
-// limparAcessosAntigos();
+// Executar limpeza ao iniciar
+limparAcessosAntigos();
 
-// Executar limpeza a cada 10 segundos (mais rápido e preciso) (MOVIDO PARA DEPOIS DA INICIALIZAÇÃO DO BANCO)
-// setInterval(limparAcessosAntigos, 10 * 1000);
+// Executar limpeza a cada 10 segundos
+setInterval(limparAcessosAntigos, 10 * 1000);
 
 // Redirecionar para login se não autenticado
 app.get('/', (req, res, next) => {
@@ -675,18 +1054,7 @@ app.get('/', (req, res, next) => {
     next();
 });
 
-// Middleware para adicionar headers de cache para arquivos estáticos
-app.use((req, res, next) => {
-    // Para arquivos JavaScript, CSS e HTML - não cachear
-    if (req.path.endsWith('.js') || req.path.endsWith('.css') || req.path.endsWith('.html')) {
-        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.set('Pragma', 'no-cache');
-        res.set('Expires', '0');
-    }
-    next();
-});
 
-app.use(express.static('public'));
 
 // Middleware de erro para multer
 app.use((err, req, res, next) => {
@@ -704,21 +1072,30 @@ app.use((err, req, res, next) => {
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
-// Conectar ao banco SQLite
-const db = new sqlite3.Database('./syscontrole.db', (err) => {
-    if (err) {
-        console.error('Erro ao conectar com o banco:', err.message);
+// Inicializar o banco de dados (SQLite ou Postgres)
+async function inicializarConexao() {
+    if (DB_TYPE === 'postgres') {
+        try {
+            await pool.connect();
+            console.log('✅ Conectado ao PostgreSQL');
+            await initDatabase();
+        } catch (err) {
+            console.error('❌ Erro ao conectar com PostgreSQL:', err.message);
+        }
     } else {
-        console.log('Conectado ao banco SQLite');
-        initDatabase();
+        console.log('✅ Conectado ao banco SQLite');
+        await initDatabase();
     }
-});
+}
+
+inicializarConexao();
 
 // Inicializar tabelas
-function initDatabase() {
-    db.serialize(() => {
-        // Criar tabela SSMA
-        db.run(`
+async function initDatabase() {
+    try {
+        await db.serialize(async () => {
+            // Criar tabela SSMA
+            await db.run(`
             CREATE TABLE IF NOT EXISTS SSMA (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 Nome TEXT NOT NULL,
@@ -741,26 +1118,26 @@ function initDatabase() {
                 Nr11_Vencimento TEXT,
                 Nr11_Status TEXT,
                 Nr12_DataEmissao TEXT,
-                Nr12_Vencimento TEXT,
+                NR12_Vencimento TEXT,
                 Nr12_Status TEXT,
                 Nr12_Ferramenta TEXT,
                 Nr17_DataEmissao TEXT,
                 Nr17_Vencimento TEXT,
                 Nr17_Status TEXT,
                 Nr18_DataEmissao TEXT,
-                Nr18_Vencimento TEXT,
+                NR18_Vencimento TEXT,
                 Nr18_Status TEXT,
                 Nr20_DataEmissao TEXT,
                 Nr20_Vencimento TEXT,
                 Nr20_Status TEXT,
                 Nr33_DataEmissao TEXT,
-                Nr33_Vencimento TEXT,
+                NR33_Vencimento TEXT,
                 Nr33_Status TEXT,
                 Nr34_DataEmissao TEXT,
                 Nr34_Vencimento TEXT,
                 Nr34_Status TEXT,
                 Nr35_DataEmissao TEXT,
-                Nr35_Vencimento TEXT,
+                NR35_Vencimento TEXT,
                 Nr35_Status TEXT,
                 Epi_DataEmissao TEXT,
                 epiVencimento TEXT,
@@ -815,218 +1192,231 @@ function initDatabase() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             titulo TEXT DEFAULT 'Relatório de Cursos',
             rodape TEXT DEFAULT 'SSMA',
-            logo TEXT DEFAULT '/Logo-Hoss.jpg'
+            logo TEXT DEFAULT '/Logo-Hoss.jpg',
+            tecnico_seguranca TEXT DEFAULT ''
         )
     `);
     
-    // Adicionar coluna logo se não existir
-    db.run(`ALTER TABLE configuracao_relatorio ADD COLUMN logo TEXT DEFAULT '/Logo-Hoss.jpg'`, (err) => {
-        // Ignora erro se coluna já existe
-    });
+    // Adicionar colunas se não existirem (usando try/catch para ignorar erros de coluna duplicada)
+    try { await db.run(`ALTER TABLE configuracao_relatorio ADD COLUMN logo TEXT DEFAULT '/Logo-Hoss.jpg'`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN DataEmissao TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Celular TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN CPF TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr12_Ferramenta TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN DataInativacao DATETIME`); } catch (err) {}
     
-    // Adicionar coluna DataEmissao do ASO se não existir
-    db.run(`ALTER TABLE SSMA ADD COLUMN DataEmissao TEXT`, (err) => {
-        // Ignora erro se coluna já existe
-    });
-    
-    // Adicionar coluna Celular se não existir
-    db.run(`ALTER TABLE SSMA ADD COLUMN Celular TEXT`, (err) => {
-        // Ignora erro se coluna já existe
-    });
-    
-    // Adicionar coluna CPF se não existir
-    db.run(`ALTER TABLE SSMA ADD COLUMN CPF TEXT`, (err) => {
-        // Ignora erro se coluna já existe
-    });
-    
-    // Adicionar coluna Nr12_Ferramenta se não existir
-    db.run(`ALTER TABLE SSMA ADD COLUMN Nr12_Ferramenta TEXT`, (err) => {
-        // Ignora erro se coluna já existe
-    });
-    
-    // Adicionar coluna DataInativacao se não existir
-    db.run(`ALTER TABLE SSMA ADD COLUMN DataInativacao DATETIME`, (err) => {
-        // Ignora erro se coluna já existe
-    });
+    // Novas colunas para controle de certificados por ano
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr06_NumControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr06_AnoControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr12_NumControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr12_AnoControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr18_NumControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr18_AnoControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr20_NumControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr20_AnoControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr33_NumControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr33_AnoControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr11_NumControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr11_AnoControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr35_NumControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr35_AnoControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr06_Validade2Anos INTEGER DEFAULT 0`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Epi_Validade8Meses INTEGER DEFAULT 0`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr17_NumControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Nr17_AnoControle TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Epi_Dados TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE SSMA ADD COLUMN Epi_Setor TEXT`); } catch (err) {}
+    try { await db.run(`ALTER TABLE configuracao_relatorio ADD COLUMN tecnico_seguranca TEXT DEFAULT ''`); } catch (err) {}
+    try { await db.run(`ALTER TABLE configuracao_relatorio ADD COLUMN epi_itens_padrao TEXT DEFAULT '[]'`); } catch (err) {}
     
     // Inserir configuração padrão se não existir
-    db.get('SELECT COUNT(*) as count FROM configuracao_relatorio', (err, row) => {
-        if (!err && row && row.count === 0) {
-            db.run(`INSERT INTO configuracao_relatorio (titulo, rodape, logo) VALUES (?, ?, ?)`, 
-                ['Relatório de Cursos', 'SSMA', '/Logo-Hoss.jpg']);
+    const cfgCount = await db.get('SELECT COUNT(*) as count FROM configuracao_relatorio');
+    if (cfgCount && cfgCount.count === 0) {
+        await db.run(`INSERT INTO configuracao_relatorio (titulo, rodape, logo) VALUES (?, ?, ?)`, 
+            ['Relatório de Cursos', 'SSMA', '/Logo-Hoss.jpg']);
+    }
+
+    // Criar tabela HABILITAR_CURSOS
+    await db.run(`
+        CREATE TABLE IF NOT EXISTS HABILITAR_CURSOS (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            curso TEXT NOT NULL,
+            habilitado INTEGER DEFAULT 1
+        )
+    `);
+    
+    // Inserir cursos padrão se não existir
+    const cursosPadrao = ['ASO', 'NR-06', 'NR-10', 'NR-11', 'NR-12', 'NR-17', 'NR-18', 'NR-20', 'NR-33', 'NR-34', 'NR-35', 'EPI'];
+    
+    for (const curso of cursosPadrao) {
+        const existe = await db.get('SELECT id FROM HABILITAR_CURSOS WHERE curso = ?', [curso]);
+        if (!existe) {
+            await db.run(`INSERT INTO HABILITAR_CURSOS (curso, habilitado) VALUES (?, 1)`, [curso]);
+            console.log(`✅ Curso ${curso} adicionado à tabela HABILITAR_CURSOS`);
         }
-    });
-        // Criar tabela HABILITAR_CURSOS
-        db.run(`
-            CREATE TABLE IF NOT EXISTS HABILITAR_CURSOS (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                curso TEXT NOT NULL,
-                habilitado INTEGER DEFAULT 1
-            )
-        `);
-        
-        // Inserir cursos padrão se não existir
-        db.get('SELECT COUNT(*) as count FROM HABILITAR_CURSOS', (err, row) => {
-            if (!err && row && row.count === 0) {
-                const cursos = ['ASO', 'NR-06', 'NR-10', 'NR-11', 'NR-12', 'NR-17', 'NR-18', 'NR-20', 'NR-33', 'NR-34', 'NR-35', 'EPI'];
-                cursos.forEach(curso => {
-                    db.run(`INSERT INTO HABILITAR_CURSOS (curso, habilitado) VALUES (?, 1)`, [curso]);
-                });
-                console.log('✅ Cursos padrão inseridos na tabela HABILITAR_CURSOS');
-            }
-        });
-        
-        // Criar tabela RASTREAMENTO_ACESSOS
-        db.run(`
-            CREATE TABLE IF NOT EXISTS RASTREAMENTO_ACESSOS (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                usuario TEXT NOT NULL,
-                ip TEXT,
-                navegador TEXT,
-                sistemaOperacional TEXT,
-                status TEXT DEFAULT 'online',
-                dataHoraEntrada DATETIME DEFAULT CURRENT_TIMESTAMP,
-                dataHoraSaida DATETIME,
-                lastHeartbeat DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-        
-        // Criar tabela HISTORICO_PRESENCA
-        db.run(`
-            CREATE TABLE IF NOT EXISTS HISTORICO_PRESENCA (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                mesAno TEXT NOT NULL,
-                funcionarioId INTEGER NOT NULL,
-                funcionarioNome TEXT,
-                funcionarioEmpresa TEXT,
-                funcionarioFuncao TEXT,
-                funcionarioSituacao TEXT,
-                dadosPresenca TEXT,
-                comentarios TEXT,
-                dataCriacao DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-        
-        // Criar tabela MUDANCA_FUNCAO_PRESENCA
-        // Registra quando um funcionário muda de função durante o mês
-        db.run(`
-            CREATE TABLE IF NOT EXISTS MUDANCA_FUNCAO_PRESENCA (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                mesAno TEXT NOT NULL,
-                funcionarioId INTEGER NOT NULL,
-                funcionarioNome TEXT,
-                funcaoAnterior TEXT,
-                funcaoNova TEXT,
-                diaInicio INTEGER NOT NULL,
-                anotacoes TEXT,
-                dataCriacao DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-        
-        // Criar tabela EMPRESAS_OCULTAS
-        // Armazena empresas que devem ser ocultadas na tabela-mes
-        db.run(`
-            CREATE TABLE IF NOT EXISTS EMPRESAS_OCULTAS (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                empresaOculta TEXT NOT NULL UNIQUE,
-                dataCriacao DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-        
-        console.log('Tabelas criadas/verificadas com sucesso');
+    }
+    console.log('✅ Verificação de cursos concluída na tabela HABILITAR_CURSOS');
+    
+    // Criar tabela RASTREAMENTO_ACESSOS
+    await db.run(`
+        CREATE TABLE IF NOT EXISTS RASTREAMENTO_ACESSOS (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario TEXT NOT NULL,
+            ip TEXT,
+            navegador TEXT,
+            sistemaOperacional TEXT,
+            status TEXT DEFAULT 'online',
+            dataHoraEntrada DATETIME DEFAULT CURRENT_TIMESTAMP,
+            dataHoraSaida DATETIME,
+            lastHeartbeat DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
+    // Criar tabela HISTORICO_PRESENCA
+    await db.run(`
+        CREATE TABLE IF NOT EXISTS HISTORICO_PRESENCA (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mesAno TEXT NOT NULL,
+            funcionarioId INTEGER NOT NULL,
+            funcionarioNome TEXT,
+            funcionarioEmpresa TEXT,
+            funcionarioFuncao TEXT,
+            funcionarioSituacao TEXT,
+            dadosPresenca TEXT,
+            comentarios TEXT,
+            dataCriacao DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
+    // Criar tabela MUDANCA_FUNCAO_PRESENCA
+    await db.run(`
+        CREATE TABLE IF NOT EXISTS MUDANCA_FUNCAO_PRESENCA (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mesAno TEXT NOT NULL,
+            funcionarioId INTEGER NOT NULL,
+            funcionarioNome TEXT,
+            funcaoAnterior TEXT,
+            funcaoNova TEXT,
+            diaInicio INTEGER NOT NULL,
+            anotacoes TEXT,
+            dataCriacao DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
+    // Criar tabela EMPRESAS_OCULTAS
+    await db.run(`
+        CREATE TABLE IF NOT EXISTS EMPRESAS_OCULTAS (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empresaOculta TEXT NOT NULL UNIQUE,
+            dataCriacao DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // Criar tabela de configuração das NRs (Persistência Global)
+    await db.run(`
+        CREATE TABLE IF NOT EXISTS configuracao_nrs (
+            nr TEXT PRIMARY KEY,
+            dados TEXT,
+            dataAtualizacao DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
+        }); // Fim do db.serialize
         
         // Criar índices
-        db.run(`CREATE INDEX IF NOT EXISTS idx_ssma_situacao ON SSMA(Situacao)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_ssma_empresa ON SSMA(Empresa)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_ssma_nome ON SSMA(Nome)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_ssma_funcao ON SSMA(Funcao)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_ssma_empresa_nome ON SSMA(Empresa, Nome)`);
-        db.run(`CREATE INDEX IF NOT EXISTS idx_fornecedor_situacao ON FORNECEDOR(Situacao)`);
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_ssma_situacao ON SSMA(Situacao)`);
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_ssma_empresa ON SSMA(Empresa)`);
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_ssma_nome ON SSMA(Nome)`);
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_ssma_funcao ON SSMA(Funcao)`);
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_ssma_empresa_nome ON SSMA(Empresa, Nome)`);
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_fornecedor_situacao ON FORNECEDOR(Situacao)`);
         console.log('⚡ Índices de performance criados/verificados');
         
         // Verificar registros padrão
-        verificarRegistrosPadraoSSMA();
-        verificarFornecedorPadrao();
+        await verificarRegistrosPadraoSSMA();
+        await verificarFornecedorPadrao();
         
-        // Iniciar limpeza automática
-        console.log('🧹 Iniciando limpeza automática de rastreamento...');
-        limparAcessosAntigos();
-        setInterval(limparAcessosAntigos, 10 * 1000);
-    });
+        console.log('Tabelas criadas/verificadas com sucesso');
+    } catch (err) {
+        console.error('❌ Erro no initDatabase:', err);
+    }
 }
 
-function verificarRegistrosPadraoSSMA() {
+async function verificarRegistrosPadraoSSMA() {
     // Garantir que existe pelo menos um registro
-    db.get('SELECT COUNT(*) as count FROM SSMA', (err, row) => {
-        if (err) {
-            console.log('Erro ao verificar registros:', err.message);
-        } else if (row.count === 0) {
-            // Inserir registro padrão se não existir nenhum
-            db.run(`INSERT INTO SSMA (
-                Nome, Empresa, Funcao, Vencimento, Nr10_Vencimento, 
-                Situacao, Anotacoes, Ambientacao, Nr10_DataEmissao
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
-                'Ervanio Freitas Rodrigues',
-                'Hoss',
-                'Técnico de Segurança',
-                '2026-12-08',
-                '2027-12-09',
-                'S',
-                'teste',
-                'S',
-                '09/12/2025'
-            ], (err) => {
-                if (err) {
-                    console.log('Erro ao inserir registro padrão:', err.message);
-                } else {
-                    console.log('Registro padrão inserido');
-                }
-            });
-        } else {
-            // Corrigir dados corrompidos se existirem
-            db.run(`UPDATE SSMA SET 
-                Nome = 'Ervanio Freitas Rodrigues',
-                Empresa = 'Hoss', 
-                Funcao = 'Técnico de Segurança',
-                Anotacoes = 'teste'
-                WHERE id = 1 AND Nome = '[object Object]'`, (err) => {
-                if (err) {
-                    console.log('Erro ao corrigir dados:', err.message);
-                } else {
-                    console.log('Dados corrompidos corrigidos');
-                }
-            });
-        }
-    });
+    const row = await db.get('SELECT COUNT(*) as count FROM SSMA');
+    if (row && row.count === 0) {
+        await db.run(`INSERT INTO SSMA (
+            Nome, Empresa, Funcao, Vencimento, Nr10_Vencimento, 
+            Situacao, Anotacoes, Ambientacao, Nr10_DataEmissao
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+            'Ervanio Freitas Rodrigues', 'Hoss', 'Técnico de Segurança',
+            '2026-12-08', '2027-12-09', 'S', 'teste', 'S', '09/12/2025'
+        ]);
+        console.log('Registro padrão inserido');
+    }
 }
 
-// Verificar e inserir fornecedor padrão
-function verificarFornecedorPadrao() {
-    db.get('SELECT COUNT(*) as count FROM FORNECEDOR', (err, row) => {
-        if (err) {
-            console.log('Erro ao verificar fornecedores:', err.message);
-        } else if (row.count === 0) {
-            // Inserir fornecedor padrão se não existir nenhum
-            db.run(`INSERT INTO FORNECEDOR (
-                Empresa, CNPJ, Telefone, Celular, Contato, Observacao, Situacao
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
-                'Hoss',
-                '00.000.000/0000-00',
-                '(11) 2554-3998',
-                '(11) 94576-6912',
-                'Ervanio Freitas Rodrigues',
-                'Suporte de TI',
-                'S'
-            ], (err) => {
-                if (err) {
-                    console.log('Erro ao inserir fornecedor padrão:', err.message);
-                } else {
-                    console.log('Fornecedor padrão inserido');
-                }
-            });
-        }
-    });
+async function verificarFornecedorPadrao() {
+    const row = await db.get('SELECT COUNT(*) as count FROM FORNECEDOR');
+    if (row && row.count === 0) {
+        await db.run(`INSERT INTO FORNECEDOR (
+            Empresa, CNPJ, Telefone, Celular, Contato, Observacao, Situacao
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
+            'Hoss', '00.000.000/0000-00', '(11) 2554-3998', '(11) 94576-6912',
+            'Ervanio Freitas Rodrigues', 'Suporte de TI', 'S'
+        ]);
+        console.log('Fornecedor padrão inserido');
+    }
 }
+
+// ==================== NOVAS ROTAS PARA CONFIGURAÇÃO DE NRS ====================
+
+// GET - Buscar configurações de uma NR
+app.get('/api/config/nr/:nr', async (req, res) => {
+    const nr = req.params.nr.toLowerCase();
+    const sql = `SELECT dados FROM configuracao_nrs WHERE nr = ?`;
+    
+    try {
+        const row = await db.get(sql, [nr]);
+        if (row && row.dados) {
+            res.json({ success: true, dados: JSON.parse(row.dados) });
+        } else {
+            res.json({ success: false, message: 'Configuração não encontrada' });
+        }
+    } catch (err) {
+        console.error(`Erro ao carregar config da ${nr}:`, err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST - Salvar configurações de uma NR
+app.post('/api/config/nr/:nr', async (req, res) => {
+    const nr = req.params.nr.toLowerCase();
+    const { dados } = req.body;
+    
+    if (!dados) {
+        return res.status(400).json({ success: false, message: 'Dados não informados' });
+    }
+    
+    const dadosJson = JSON.stringify(dados);
+    const sql = DB_TYPE === 'sqlite' 
+        ? `INSERT INTO configuracao_nrs (nr, dados, dataAtualizacao) VALUES (?, ?, datetime('now', 'localtime')) 
+           ON CONFLICT(nr) DO UPDATE SET dados = excluded.dados, dataAtualizacao = datetime('now', 'localtime')`
+        : `INSERT INTO configuracao_nrs (nr, dados, dataAtualizacao) VALUES ($1, $2, CURRENT_TIMESTAMP) 
+           ON CONFLICT(nr) DO UPDATE SET dados = EXCLUDED.dados, dataAtualizacao = CURRENT_TIMESTAMP`;
+    
+    try {
+        await db.run(sql, [nr, dadosJson]);
+        console.log(`✅ Configuração da ${nr.toUpperCase()} salva no banco de dados`);
+        res.json({ success: true, message: 'Configuração salva com sucesso' });
+    } catch (err) {
+        console.error(`Erro ao salvar config da ${nr}:`, err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ==============================================================================
 
 // FUNÇÃO PARA CALCULAR STATUS DOS CURSOS (igual ao sistema desktop)
 function calcularStatus(dataVencimento) {
@@ -1045,7 +1435,7 @@ function calcularStatus(dataVencimento) {
 // ROTAS DA API - EXATAMENTE IGUAL AO SISTEMA DESKTOP
 
 // GET - Verificar CPF duplicado (usado pelo frontend antes de salvar)
-app.get('/api/ssma/check-cpf', (req, res) => {
+app.get('/api/ssma/check-cpf', async (req, res) => {
     const { cpf, excludeId } = req.query;
     
     if (!cpf) {
@@ -1068,12 +1458,8 @@ app.get('/api/ssma/check-cpf', (req, res) => {
     
     sql += ' LIMIT 1';
     
-    db.get(sql, params, (err, row) => {
-        if (err) {
-            console.error('Erro ao verificar CPF:', err);
-            return res.status(500).json({ error: 'Erro ao verificar CPF' });
-        }
-        
+    try {
+        const row = await db.get(sql, params);
         if (row) {
             console.log('⚠️ CPF duplicado encontrado:', row);
             res.json({ 
@@ -1087,11 +1473,40 @@ app.get('/api/ssma/check-cpf', (req, res) => {
             console.log('✅ CPF disponível');
             res.json({ exists: false });
         }
-    });
+    } catch (err) {
+        console.error('Erro ao verificar CPF:', err);
+        res.status(500).json({ error: 'Erro ao verificar CPF' });
+    }
 });
 
-// GET - Listar todos os registros SSMA com filtros
-app.get('/api/ssma', (req, res) => {
+// Função para normalizar a capitalização das colunas retornadas do SQLite, para evitar bugs de casing
+const normalizarCasingRow = (row) => {
+    if (!row) return row;
+    
+    // NR12
+    if (row.Nr12_Vencimento !== undefined && row.NR12_Vencimento === undefined) row.NR12_Vencimento = row.Nr12_Vencimento;
+    if (row.NR12_Vencimento !== undefined && row.Nr12_Vencimento === undefined) row.Nr12_Vencimento = row.NR12_Vencimento;
+    if (row.Nr12_DataEmissao !== undefined && row.nr12_dataEmissao === undefined) row.nr12_dataEmissao = row.Nr12_DataEmissao;
+    if (row.Nr12_Status !== undefined && row.nr12_status === undefined) row.nr12_status = row.Nr12_Status;
+    if (row.Nr12_Ferramenta !== undefined && row.nr12_ferramenta === undefined) row.nr12_ferramenta = row.Nr12_Ferramenta;
+
+    // NR18
+    if (row.Nr18_Vencimento !== undefined && row.NR18_Vencimento === undefined) row.NR18_Vencimento = row.Nr18_Vencimento;
+    if (row.NR18_Vencimento !== undefined && row.Nr18_Vencimento === undefined) row.Nr18_Vencimento = row.NR18_Vencimento;
+
+    // NR33
+    if (row.Nr33_Vencimento !== undefined && row.NR33_Vencimento === undefined) row.NR33_Vencimento = row.Nr33_Vencimento;
+    if (row.NR33_Vencimento !== undefined && row.Nr33_Vencimento === undefined) row.Nr33_Vencimento = row.NR33_Vencimento;
+
+    // NR35
+    if (row.Nr35_Vencimento !== undefined && row.NR35_Vencimento === undefined) row.NR35_Vencimento = row.Nr35_Vencimento;
+    if (row.NR35_Vencimento !== undefined && row.Nr35_Vencimento === undefined) row.Nr35_Vencimento = row.NR35_Vencimento;
+
+    return row;
+};
+
+// GET - Listar todos os registros SSMA com filtros (RESTAURAÇÃO NUCLEAR)
+app.get('/api/ssma', async (req, res) => {
     const { nome, empresa, funcao, situacao, page = 1, limit = 10,
             statusASO, statusNR06, statusNR10, statusNR11, statusNR12, 
             statusNR17, statusNR18, statusNR20, statusNR33, statusNR34, 
@@ -1103,81 +1518,43 @@ app.get('/api/ssma', (req, res) => {
         return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
     };
     
-    // Log COMPLETO para debug
-    console.log(`📨 /api/ssma - situacao=${situacao}, dataInicio=${dataInicio}, dataFim=${dataFim}`);
+    // NUCLEAR: Carregar TUDO do banco para evitar colunas faltando
+    let sql = 'SELECT * FROM SSMA WHERE 1=1';
+    let params = [];
     
-    // OTIMIZADO: Não carregar coluna Foto na listagem (muito pesada)
-    let baseSql = `SELECT id, Nome, Empresa, Funcao, Vencimento, Situacao, Anotacoes, Ambientacao, Cadastro,
-        Nr06_DataEmissao, Nr06_Vencimento, Nr06_Status,
-        Nr10_DataEmissao, Nr10_Vencimento, Nr10_Status,
-        Nr11_DataEmissao, Nr11_Vencimento, Nr11_Status,
-        Nr12_DataEmissao, NR12_Vencimento, Nr12_Status,
-        Nr17_DataEmissao, Nr17_Vencimento, Nr17_Status,
-        Nr18_DataEmissao, NR18_Vencimento, Nr18_Status,
-        Nr20_DataEmissao, Nr20_Vencimento, Nr20_Status,
-        Nr33_DataEmissao, NR33_Vencimento, Nr33_Status,
-        Nr34_DataEmissao, Nr34_Vencimento, Nr34_Status,
-        Nr35_DataEmissao, NR35_Vencimento, Nr35_Status,
-        Epi_DataEmissao, epiVencimento, EpiStatus,
-        CASE WHEN Foto IS NOT NULL THEN 1 ELSE 0 END as temFoto
-        FROM SSMA WHERE 1=1`;
-    let baseParams = [];
-    
-    // Filtros básicos - REMOVENDO ACENTOS para busca
-    const nomeSemAcento = removerAcentos(nome);
-    const empresaSemAcento = removerAcentos(empresa);
-    const funcaoSemAcento = removerAcentos(funcao);
-    
-    // Não usar LIKE no SQL, vamos filtrar no JavaScript depois
-    
+    if (nome) {
+        sql += ' AND UPPER(Nome) LIKE UPPER(?)';
+        params.push(`%${removerAcentos(nome)}%`);
+    }
+    if (empresa) {
+        sql += ' AND UPPER(Empresa) LIKE UPPER(?)';
+        params.push(`%${removerAcentos(empresa)}%`);
+    }
+    if (funcao) {
+        sql += ' AND UPPER(Funcao) LIKE UPPER(?)';
+        params.push(`%${removerAcentos(funcao)}%`);
+    }
     if (situacao) {
-        baseSql += ' AND Situacao = ?';
-        baseParams.push(situacao);
+        sql += ' AND Situacao = ?';
+        params.push(situacao);
     }
     
-    // Filtro por data de cadastro
+    const dateFunc = DB_TYPE === 'postgres' ? 'CAST(Cadastro AS DATE)' : 'date(Cadastro)';
     if (dataInicio) {
-        baseSql += ' AND date(Cadastro) >= date(?)';
-        baseParams.push(dataInicio);
+        sql += ` AND ${dateFunc} >= ?`;
+        params.push(dataInicio);
     }
     if (dataFim) {
-        baseSql += ' AND date(Cadastro) <= date(?)';
-        baseParams.push(dataFim);
+        sql += ` AND ${dateFunc} <= ?`;
+        params.push(dataFim);
     }
     
-    baseSql += ' ORDER BY Empresa, Nome';
+    sql += ' ORDER BY Empresa, Nome';
     
-    console.log('🔍 SQL:', baseSql);
-    console.log('🔍 Params:', baseParams);
-    
-    db.all(baseSql, baseParams, (err, allRows) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        
-        // Filtrar por nome, empresa, função SEM ACENTOS
+    try {
+        const allRows = await db.all(sql, params);
         let filteredRows = allRows;
         
-        if (nomeSemAcento) {
-            filteredRows = filteredRows.filter(row => 
-                removerAcentos(row.Nome).includes(nomeSemAcento)
-            );
-        }
-        
-        if (empresaSemAcento) {
-            filteredRows = filteredRows.filter(row => 
-                removerAcentos(row.Empresa).includes(empresaSemAcento)
-            );
-        }
-        
-        if (funcaoSemAcento) {
-            filteredRows = filteredRows.filter(row => 
-                removerAcentos(row.Funcao).includes(funcaoSemAcento)
-            );
-        }
-        
-        // Função para verificar status de uma data
         const getStatus = (dataStr) => {
             if (!dataStr) return 'NaoInformado';
             const hoje = new Date();
@@ -1188,136 +1565,35 @@ app.get('/api/ssma', (req, res) => {
             return 'OK';
         };
         
-        // Filtrar por nome, empresa, função SEM ACENTOS (já feito acima)
-        // Agora filtrar por status de cursos se especificado
+        const cursosStatusMap = {
+            'statusASO': 'Vencimento', 'statusNR06': 'Nr06_Vencimento', 'statusNR10': 'Nr10_Vencimento',
+            'statusNR11': 'Nr11_Vencimento', 'statusNR12': 'NR12_Vencimento', 'statusNR17': 'Nr17_Vencimento',
+            'statusNR18': 'NR18_Vencimento', 'statusNR20': 'Nr20_Vencimento', 'statusNR33': 'NR33_Vencimento',
+            'statusNR34': 'Nr34_Vencimento', 'statusNR35': 'NR35_Vencimento', 'statusEPI': 'epiVencimento'
+        };
+
+        Object.keys(cursosStatusMap).forEach(statusKey => {
+            const statusValue = req.query[statusKey];
+            if (statusValue) {
+                const column = cursosStatusMap[statusKey];
+                filteredRows = filteredRows.filter(row => {
+                    const status = getStatus(row[column]);
+                    if (statusValue === 'vencido') return status === 'Vencido';
+                    if (statusValue === 'renovar') return status === 'Renovar';
+                    if (statusValue === 'ok') return status === 'OK';
+                    return true;
+                });
+            }
+        });
         
-        if (statusASO) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.Vencimento);
-                if (statusASO === 'vencido') return status === 'Vencido';
-                if (statusASO === 'renovar') return status === 'Renovar';
-                if (statusASO === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        if (statusNR06) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.Nr06_Vencimento);
-                if (statusNR06 === 'vencido') return status === 'Vencido';
-                if (statusNR06 === 'renovar') return status === 'Renovar';
-                if (statusNR06 === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        if (statusNR10) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.Nr10_Vencimento);
-                if (statusNR10 === 'vencido') return status === 'Vencido';
-                if (statusNR10 === 'renovar') return status === 'Renovar';
-                if (statusNR10 === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        if (statusNR11) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.Nr11_Vencimento);
-                if (statusNR11 === 'vencido') return status === 'Vencido';
-                if (statusNR11 === 'renovar') return status === 'Renovar';
-                if (statusNR11 === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        if (statusNR12) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.NR12_Vencimento);
-                if (statusNR12 === 'vencido') return status === 'Vencido';
-                if (statusNR12 === 'renovar') return status === 'Renovar';
-                if (statusNR12 === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        if (statusNR17) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.Nr17_Vencimento);
-                if (statusNR17 === 'vencido') return status === 'Vencido';
-                if (statusNR17 === 'renovar') return status === 'Renovar';
-                if (statusNR17 === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        if (statusNR18) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.NR18_Vencimento);
-                if (statusNR18 === 'vencido') return status === 'Vencido';
-                if (statusNR18 === 'renovar') return status === 'Renovar';
-                if (statusNR18 === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        if (statusNR20) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.Nr20_Vencimento);
-                if (statusNR20 === 'vencido') return status === 'Vencido';
-                if (statusNR20 === 'renovar') return status === 'Renovar';
-                if (statusNR20 === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        if (statusNR33) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.NR33_Vencimento);
-                if (statusNR33 === 'vencido') return status === 'Vencido';
-                if (statusNR33 === 'renovar') return status === 'Renovar';
-                if (statusNR33 === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        if (statusNR34) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.Nr34_Vencimento);
-                if (statusNR34 === 'vencido') return status === 'Vencido';
-                if (statusNR34 === 'renovar') return status === 'Renovar';
-                if (statusNR34 === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        if (statusNR35) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.NR35_Vencimento);
-                if (statusNR35 === 'vencido') return status === 'Vencido';
-                if (statusNR35 === 'renovar') return status === 'Renovar';
-                if (statusNR35 === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        if (statusEPI) {
-            filteredRows = filteredRows.filter(row => {
-                const status = getStatus(row.epiVencimento);
-                if (statusEPI === 'vencido') return status === 'Vencido';
-                if (statusEPI === 'renovar') return status === 'Renovar';
-                if (statusEPI === 'ok') return status === 'OK';
-                return true;
-            });
-        }
-        
-        // Aplicar paginação nos resultados filtrados
         const total = filteredRows.length;
-        const offset = (page - 1) * limit;
-        const rows = filteredRows.slice(offset, offset + parseInt(limit));
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+        const offset = (pageNum - 1) * limitNum;
+        const rows = filteredRows.slice(offset, offset + limitNum);
         
-        // Calcular status para cada registro
         rows.forEach(row => {
+            normalizarCasingRow(row);
             row.Nr06_Status = calcularStatus(row.Nr06_Vencimento);
             row.Nr10_Status = calcularStatus(row.Nr10_Vencimento);
             row.Nr11_Status = calcularStatus(row.Nr11_Vencimento);
@@ -1330,93 +1606,79 @@ app.get('/api/ssma', (req, res) => {
             row.Nr35_Status = calcularStatus(row.NR35_Vencimento);
             row.EpiStatus = calcularStatus(row.epiVencimento);
             
-            // Status geral (pior status entre todos)
-            const statuses = [row.Nr06_Status, row.Nr10_Status, row.Nr11_Status, row.Nr12_Status, 
-                            row.Nr17_Status, row.Nr18_Status, row.Nr20_Status, row.Nr33_Status, 
-                            row.Nr34_Status, row.Nr35_Status, row.EpiStatus];
-            
-            if (statuses.includes('Vencido')) row.Status = 'Vencido';
-            else if (statuses.includes('Renovar')) row.Status = 'Renovar';
-            else row.Status = 'OK';
-            
-            // Preparar URL da foto se existir (usando flag temFoto)
+            // Flag para o frontend saber se tem foto
+            row.temFoto = row.Foto ? 1 : 0;
             if (row.temFoto) {
-                row.fotoUrl = `/api/foto/${row.id}`;
+                const tenantParam = req.tenantId ? `?tenant_id=${req.tenantId}` : '';
+                row.fotoUrl = `/api/foto/${row.id}${tenantParam}`;
             } else {
                 row.fotoUrl = null;
             }
-            delete row.temFoto;
+            // Remover binário pesado do JSON para não travar o navegador
+            delete row.Foto;
         });
         
-        // Contar totais de ativos e inativos de TODA a tabela (sem filtro de situação)
-        // N = ATIVO, S = CANCELADO (conforme Excel)
-        db.get(`SELECT 
+        const counts = await db.get(`SELECT 
             SUM(CASE WHEN Situacao = 'N' THEN 1 ELSE 0 END) as totalAtivos,
             SUM(CASE WHEN Situacao = 'S' THEN 1 ELSE 0 END) as totalInativos
-            FROM SSMA`, (err, countRow) => {
-            if (err) {
-                console.error('Erro ao contar ativos/inativos:', err);
-            }
+            FROM SSMA`);
             
-            const totalAtivos = countRow?.totalAtivos || 0;
-            const totalInativos = countRow?.totalInativos || 0;
-            
-            const totalPages = Math.ceil(total / limit);
-            console.log(`📊 Retornando: total=${total}, page=${page}, limit=${limit}, totalPages=${totalPages}, ativos=${totalAtivos}, inativos=${totalInativos}`);
-            
-            res.json({
-                data: rows,
-                total: total,
-                page: parseInt(page),
-                totalPages: totalPages,
-                totalAtivos: totalAtivos,
-                totalInativos: totalInativos
-            });
+        res.json({
+            data: rows,
+            total: total,
+            page: pageNum,
+            totalPages: Math.ceil(total / limitNum),
+            totalAtivos: counts?.totalAtivos || 0,
+            totalInativos: counts?.totalInativos || 0
         });
-    });
+    } catch (err) {
+        console.error('Erro /api/ssma NUCLEAR:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
-// GET - Contadores de vencimentos para TODOS os registros filtrados (não paginado)
-app.get('/api/ssma/contadores', (req, res) => {
+
+// GET - Contadores de vencimentos para TODOS os registros filtrados (RESTAURADO)
+app.get('/api/ssma/contadores', async (req, res) => {
     const { nome, empresa, funcao, situacao, dataInicio, dataFim } = req.query;
     
     let sql = 'SELECT Vencimento, Nr06_Vencimento, Nr10_Vencimento, Nr11_Vencimento, NR12_Vencimento, Nr17_Vencimento, NR18_Vencimento, Nr20_Vencimento, NR33_Vencimento, Nr34_Vencimento, NR35_Vencimento, epiVencimento FROM SSMA WHERE 1=1';
     let params = [];
     
+    const removerAcentos = (texto) => {
+        if (!texto) return '';
+        return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    };
+
     if (nome) {
-        sql += ' AND Nome LIKE ?';
-        params.push(`%${nome}%`);
+        sql += ' AND UPPER(Nome) LIKE UPPER(?)';
+        params.push(`%${removerAcentos(nome)}%`);
     }
     if (empresa) {
-        sql += ' AND Empresa LIKE ?';
-        params.push(`%${empresa}%`);
+        sql += ' AND UPPER(Empresa) LIKE UPPER(?)';
+        params.push(`%${removerAcentos(empresa)}%`);
     }
     if (funcao) {
-        sql += ' AND Funcao LIKE ?';
-        params.push(`%${funcao}%`);
+        sql += ' AND UPPER(Funcao) LIKE UPPER(?)';
+        params.push(`%${removerAcentos(funcao)}%`);
     }
     if (situacao) {
         sql += ' AND Situacao = ?';
         params.push(situacao);
     }
     
-    // Filtro por data de cadastro
+    const dateFunc = DB_TYPE === 'postgres' ? 'CAST(Cadastro AS DATE)' : 'date(Cadastro)';
     if (dataInicio) {
-        sql += ' AND date(Cadastro) >= date(?)';
+        sql += ` AND ${dateFunc} >= ?`;
         params.push(dataInicio);
     }
     if (dataFim) {
-        sql += ' AND date(Cadastro) <= date(?)';
+        sql += ` AND ${dateFunc} <= ?`;
         params.push(dataFim);
     }
     
-    db.all(sql, params, (err, rows) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        
-        // Calcular contadores
+    try {
+        const rows = await db.all(sql, params);
         const contadores = {
             aso: { vencidos: 0, renovar: 0 },
             nr06: { vencidos: 0, renovar: 0 },
@@ -1432,128 +1694,115 @@ app.get('/api/ssma/contadores', (req, res) => {
             epi: { vencidos: 0, renovar: 0 }
         };
         
-        const hoje = new Date();
+        const getStatus = (dataStr) => {
+            if (!dataStr) return 'OK';
+            const hoje = new Date();
+            const data = new Date(dataStr);
+            const diffDays = Math.ceil((data - hoje) / (1000 * 60 * 60 * 24));
+            if (diffDays < 0) return 'Vencido';
+            if (diffDays <= 30) return 'Renovar';
+            return 'OK';
+        };
         
         rows.forEach(row => {
-            // Função para calcular status
-            const calcStatus = (dataStr) => {
-                if (!dataStr) return 'OK';
-                const data = new Date(dataStr);
-                const diffDays = Math.ceil((data - hoje) / (1000 * 60 * 60 * 24));
-                if (diffDays < 0) return 'Vencido';
-                if (diffDays <= 30) return 'Renovar';
-                return 'OK';
-            };
+            normalizarCasingRow(row);
+            if (getStatus(row.Vencimento) === 'Vencido') contadores.aso.vencidos++;
+            else if (getStatus(row.Vencimento) === 'Renovar') contadores.aso.renovar++;
             
-            // ASO
-            const statusASO = calcStatus(row.Vencimento);
-            if (statusASO === 'Vencido') contadores.aso.vencidos++;
-            if (statusASO === 'Renovar') contadores.aso.renovar++;
+            if (getStatus(row.Nr06_Vencimento) === 'Vencido') contadores.nr06.vencidos++;
+            else if (getStatus(row.Nr06_Vencimento) === 'Renovar') contadores.nr06.renovar++;
             
-            // NR-06
-            const statusNR06 = calcStatus(row.Nr06_Vencimento);
-            if (statusNR06 === 'Vencido') contadores.nr06.vencidos++;
-            if (statusNR06 === 'Renovar') contadores.nr06.renovar++;
+            if (getStatus(row.Nr10_Vencimento) === 'Vencido') contadores.nr10.vencidos++;
+            else if (getStatus(row.Nr10_Vencimento) === 'Renovar') contadores.nr10.renovar++;
             
-            // NR-10
-            const statusNR10 = calcStatus(row.Nr10_Vencimento);
-            if (statusNR10 === 'Vencido') contadores.nr10.vencidos++;
-            if (statusNR10 === 'Renovar') contadores.nr10.renovar++;
+            if (getStatus(row.Nr11_Vencimento) === 'Vencido') contadores.nr11.vencidos++;
+            else if (getStatus(row.Nr11_Vencimento) === 'Renovar') contadores.nr11.renovar++;
             
-            // NR-11
-            const statusNR11 = calcStatus(row.Nr11_Vencimento);
-            if (statusNR11 === 'Vencido') contadores.nr11.vencidos++;
-            if (statusNR11 === 'Renovar') contadores.nr11.renovar++;
+            if (getStatus(row.NR12_Vencimento) === 'Vencido') contadores.nr12.vencidos++;
+            else if (getStatus(row.NR12_Vencimento) === 'Renovar') contadores.nr12.renovar++;
             
-            // NR-12
-            const statusNR12 = calcStatus(row.NR12_Vencimento);
-            if (statusNR12 === 'Vencido') contadores.nr12.vencidos++;
-            if (statusNR12 === 'Renovar') contadores.nr12.renovar++;
+            if (getStatus(row.Nr17_Vencimento) === 'Vencido') contadores.nr17.vencidos++;
+            else if (getStatus(row.Nr17_Vencimento) === 'Renovar') contadores.nr17.renovar++;
             
-            // NR-17
-            const statusNR17 = calcStatus(row.Nr17_Vencimento);
-            if (statusNR17 === 'Vencido') contadores.nr17.vencidos++;
-            if (statusNR17 === 'Renovar') contadores.nr17.renovar++;
+            if (getStatus(row.NR18_Vencimento) === 'Vencido') contadores.nr18.vencidos++;
+            else if (getStatus(row.NR18_Vencimento) === 'Renovar') contadores.nr18.renovar++;
             
-            // NR-18
-            const statusNR18 = calcStatus(row.NR18_Vencimento);
-            if (statusNR18 === 'Vencido') contadores.nr18.vencidos++;
-            if (statusNR18 === 'Renovar') contadores.nr18.renovar++;
+            if (getStatus(row.Nr20_Vencimento) === 'Vencido') contadores.nr20.vencidos++;
+            else if (getStatus(row.Nr20_Vencimento) === 'Renovar') contadores.nr20.renovar++;
             
-            // NR-20
-            const statusNR20 = calcStatus(row.Nr20_Vencimento);
-            if (statusNR20 === 'Vencido') contadores.nr20.vencidos++;
-            if (statusNR20 === 'Renovar') contadores.nr20.renovar++;
+            if (getStatus(row.NR33_Vencimento) === 'Vencido') contadores.nr33.vencidos++;
+            else if (getStatus(row.NR33_Vencimento) === 'Renovar') contadores.nr33.renovar++;
             
-            // NR-33
-            const statusNR33 = calcStatus(row.NR33_Vencimento);
-            if (statusNR33 === 'Vencido') contadores.nr33.vencidos++;
-            if (statusNR33 === 'Renovar') contadores.nr33.renovar++;
+            if (getStatus(row.Nr34_Vencimento) === 'Vencido') contadores.nr34.vencidos++;
+            else if (getStatus(row.Nr34_Vencimento) === 'Renovar') contadores.nr34.renovar++;
             
-            // NR-34
-            const statusNR34 = calcStatus(row.Nr34_Vencimento);
-            if (statusNR34 === 'Vencido') contadores.nr34.vencidos++;
-            if (statusNR34 === 'Renovar') contadores.nr34.renovar++;
+            if (getStatus(row.NR35_Vencimento) === 'Vencido') contadores.nr35.vencidos++;
+            else if (getStatus(row.NR35_Vencimento) === 'Renovar') contadores.nr35.renovar++;
             
-            // NR-35
-            const statusNR35 = calcStatus(row.NR35_Vencimento);
-            if (statusNR35 === 'Vencido') contadores.nr35.vencidos++;
-            if (statusNR35 === 'Renovar') contadores.nr35.renovar++;
-            
-            // EPI
-            const statusEPI = calcStatus(row.epiVencimento);
-            if (statusEPI === 'Vencido') contadores.epi.vencidos++;
-            if (statusEPI === 'Renovar') contadores.epi.renovar++;
+            if (getStatus(row.epiVencimento) === 'Vencido') contadores.epi.vencidos++;
+            else if (getStatus(row.epiVencimento) === 'Renovar') contadores.epi.renovar++;
         });
         
         res.json(contadores);
-    });
+    } catch (err) {
+        console.error('Erro em /api/ssma/contadores (Restaurado):', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // GET - Servir foto específica
-app.get('/api/foto/:id', (req, res) => {
+app.get('/api/foto/:id', async (req, res) => {
     const { id } = req.params;
     
-    db.get('SELECT Foto FROM SSMA WHERE id = ?', [id], (err, row) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        
+    try {
+        const row = await db.get('SELECT Foto FROM SSMA WHERE id = ?', [id]);
         if (!row || !row.Foto) {
-            res.status(404).json({ error: 'Foto não encontrada' });
-            return;
+            return res.status(404).json({ error: 'Foto não encontrada' });
         }
         
-        // Servir a foto como imagem
+        let buffer;
+        if (typeof row.Foto === 'string') {
+            buffer = Buffer.from(row.Foto, 'base64');
+        } else {
+            buffer = row.Foto;
+        }
+        
         res.set('Content-Type', 'image/jpeg');
-        res.send(row.Foto);
-    });
+        res.send(buffer);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ==================== ROTAS DE CONTAGEM ====================
 // IMPORTANTE: Estas rotas devem vir ANTES de /api/ssma/:id
 // para evitar que "count" seja interpretado como um ID
 
-app.get('/api/ssma/count', (req, res) => {
-    db.get('SELECT COUNT(*) as total FROM SSMA', (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
+app.get('/api/ssma/count', async (req, res) => {
+    try {
+        const row = await db.get('SELECT COUNT(*) as total FROM SSMA');
         res.json({ total: row.total });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.get('/api/fornecedores/count', (req, res) => {
-    db.get('SELECT COUNT(*) as total FROM FORNECEDOR', (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
+app.get('/api/fornecedores/count', async (req, res) => {
+    try {
+        const row = await db.get('SELECT COUNT(*) as total FROM FORNECEDOR');
         res.json({ total: row.total });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.get('/api/documentacao/count', (req, res) => {
-    db.get('SELECT COUNT(*) as total FROM DOCUMENTACAO', (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
+app.get('/api/documentacao/count', async (req, res) => {
+    try {
+        const row = await db.get('SELECT COUNT(*) as total FROM DOCUMENTACAO');
         res.json({ total: row.total });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.get('/api/presenca/count', (req, res) => {
@@ -1572,21 +1821,16 @@ app.get('/api/presenca/count', (req, res) => {
 });
 
 // GET - Buscar registro específico
-app.get('/api/ssma/:id', (req, res) => {
+app.get('/api/ssma/:id', async (req, res) => {
     const { id } = req.params;
     
-    db.get('SELECT * FROM SSMA WHERE id = ?', [id], (err, row) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        
+    try {
+        const row = await db.get('SELECT * FROM SSMA WHERE id = ?', [id]);
         if (!row) {
-            res.status(404).json({ error: 'Registro não encontrado' });
-            return;
+            return res.status(404).json({ error: 'Registro não encontrado' });
         }
+        normalizarCasingRow(row);
         
-        // Calcular status
         row.Nr10_Status = calcularStatus(row.Nr10_Vencimento);
         row.Nr11_Status = calcularStatus(row.Nr11_Vencimento);
         row.Nr12_Status = calcularStatus(row.NR12_Vencimento);
@@ -1597,13 +1841,163 @@ app.get('/api/ssma/:id', (req, res) => {
         row.EpiStatus = calcularStatus(row.epiVencimento);
         
         res.json(row);
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Mapeamento de carga horária por curso (NR)
+const NR_DURATIONS = {
+    'nr06': 4,
+    'nr10': 8,
+    'nr11': 8,
+    'nr12': 4,
+    'nr17': 2,
+    'nr18': 4,
+    'nr20': 16,
+    'nr33': 16,
+    'nr34': 8,
+    'nr35': 8,
+    'epi': 4
+};
+
+// GET - Obter próximo número de controle para um NR e Ano
+app.get('/api/ssma/proximo-numero', async (req, res) => {
+    const { nr, ano } = req.query;
+    
+    if (!nr || !ano) {
+        return res.status(400).json({ error: 'NR e Ano são obrigatórios' });
+    }
+    
+    try {
+        // Mapear NR para a coluna correta no banco
+        const nrMap = {
+            'nr06': 'Nr06_NumControle',
+            'nr11': 'Nr11_NumControle',
+            'nr12': 'Nr12_NumControle',
+            'nr17': 'Nr17_NumControle',
+            'nr18': 'Nr18_NumControle',
+            'nr20': 'Nr20_NumControle',
+            'nr33': 'Nr33_NumControle',
+            'nr35': 'Nr35_NumControle'
+        };
+        
+        const colNum = nrMap[nr.toLowerCase()];
+        const colAno = nr.toLowerCase() === 'nr06' ? 'Nr06_AnoControle' : 
+                      nr.toLowerCase() === 'nr11' ? 'Nr11_AnoControle' : 
+                      nr.toLowerCase() === 'nr12' ? 'Nr12_AnoControle' :
+                      nr.toLowerCase() === 'nr17' ? 'Nr17_AnoControle' :
+                      nr.toLowerCase() === 'nr18' ? 'Nr18_AnoControle' :
+                      nr.toLowerCase() === 'nr20' ? 'Nr20_AnoControle' :
+                      nr.toLowerCase() === 'nr33' ? 'Nr33_AnoControle' :
+                      'Nr35_AnoControle';
+
+        if (!colNum) {
+            return res.status(400).json({ error: 'NR inválida para controle de numeração' });
+        }
+
+        const sql = `SELECT MAX(CAST(${colNum} AS INTEGER)) as ultimo FROM SSMA WHERE ${colAno} = ?`;
+        const row = await db.get(sql, [ano]);
+        
+        const proximo = (row && row.ultimo ? parseInt(row.ultimo) : 0) + 1;
+        res.json({ proximo: proximo.toString().padStart(3, '0') });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET - Verificar se um número de controle já existe para um NR e Ano
+app.get('/api/ssma/verificar-numero', async (req, res) => {
+    const { nr, ano, num, id } = req.query;
+    
+    if (!nr || !ano || !num) {
+        return res.status(400).json({ error: 'NR, Ano e Número são obrigatórios' });
+    }
+    
+    try {
+        const nrMap = {
+            'nr06': 'Nr06', 'nr11': 'Nr11', 'nr12': 'Nr12', 'nr17': 'Nr17', 
+            'nr20': 'Nr20', 'nr33': 'Nr33', 'nr35': 'Nr35'
+        };
+        const key = nrMap[nr.toLowerCase()];
+        if (!key) return res.status(400).json({ error: 'NR inválida' });
+
+        const sql = `SELECT id, Nome FROM SSMA WHERE ${key}_NumControle = ? AND ${key}_AnoControle = ? AND id != ? LIMIT 1`;
+        const row = await db.get(sql, [num, ano, id || 0]);
+        
+        if (row) {
+            res.json({ exists: true, name: row.Nome });
+        } else {
+            res.json({ exists: false });
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH - Atualizar apenas o número e ano de controle de um NR específico
+app.patch('/api/ssma/:id/numero-controle', async (req, res) => {
+    const { id } = req.params;
+    const { nr, num, ano } = req.body;
+    
+    // Log para depuração (visto no console do servidor)
+    console.log(`📥 [PATCH/NumControle] ID: ${id}, NR: ${nr}, Num: ${num}, Ano: ${ano}`);
+
+    if (!nr) {
+        return res.status(400).json({ error: 'NR é obrigatório' });
+    }
+    
+    try {
+        const nrMap = {
+            'nr06': 'Nr06', 'nr12': 'Nr12', 'nr18': 'Nr18', 
+            'nr20': 'Nr20', 'nr33': 'Nr33', 'nr35': 'Nr35'
+        };
+        const key = nrMap[nr.toLowerCase()];
+        if (!key) return res.status(400).json({ error: 'NR inválida' });
+
+        const numeroFinal = num || '';
+        const anoFinal = ano || new Date().getFullYear();
+
+        // 1. Verificar se já existe (Deduplicação de Segurança) - Apenas se num não for vazio
+        if (numeroFinal) {
+            const checkSql = `SELECT id, Nome FROM SSMA WHERE ${key}_NumControle = ? AND ${key}_AnoControle = ? AND id != ? LIMIT 1`;
+            const existing = await db.get(checkSql, [numeroFinal, anoFinal, id]);
+            
+            if (existing) {
+                console.warn(`⚠️ [PATCH/NumControle] Conflito: ${numeroFinal}/${anoFinal} já existe para ${existing.Nome}`);
+                return res.status(409).json({ 
+                    error: `Número ${numeroFinal} já em uso por ${existing.Nome}`,
+                    name: existing.Nome 
+                });
+            }
+        }
+
+        // 2. Prosseguir com o update
+        const sql = `UPDATE SSMA SET ${key}_NumControle = ?, ${key}_AnoControle = ? WHERE id = ?`;
+        const result = await db.run(sql, [numeroFinal, anoFinal, id]);
+        
+        if (result.changes > 0) {
+            console.log(`✅ [PATCH/NumControle] Salvo com sucesso para ID ${id}`);
+            res.json({ message: 'Número de controle atualizado com sucesso' });
+        } else {
+            console.error(`❌ [PATCH/NumControle] Nenhuma alteração feita para ID ${id}. Registro existe?`);
+            res.status(404).json({ error: 'Registro não encontrado para atualização' });
+        }
+    } catch (err) {
+        console.error(`❌ [PATCH/NumControle] Erro:`, err.message);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // POST - Criar novo registro
-app.post('/api/ssma', (req, res) => {
-    console.log('=== POST /api/ssma ===');
-    console.log('Body recebido:', req.body);
+app.post('/api/ssma', async (req, res) => {
+    // Normalize body key casing for all courses to prevent any database updates from going blank
+    for (const key of Object.keys(req.body)) {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey !== key && req.body[key] !== undefined && req.body[lowerKey] === undefined) {
+            req.body[lowerKey] = req.body[key];
+        }
+    }
     
     let {
         nome, empresa, funcao, celular, cpf, dataEmissao, vencimento,
@@ -1611,137 +2005,138 @@ app.post('/api/ssma', (req, res) => {
         nr06_vencimento, nr10_vencimento, nr11_vencimento, nr12_vencimento, nr17_vencimento, nr18_vencimento, nr20_vencimento, nr33_vencimento, nr34_vencimento, nr35_vencimento, epi_vencimento,
         nr06_status, nr10_status, nr11_status, nr12_status, nr17_status, nr18_status, nr20_status, nr33_status, nr34_status, nr35_status, epi_status,
         nr12_ferramenta,
-        situacao = 'S', anotacoes, ambientacao, fotoBase64
+        nr06_numControle, nr06_anoControle, nr06_validade2anos,
+        nr11_numControle, nr11_anoControle,
+        nr12_numControle, nr12_anoControle,
+        nr17_numControle, nr17_anoControle,
+        nr18_numControle, nr18_anoControle,
+        nr20_numControle, nr20_anoControle,
+        nr33_numControle, nr33_anoControle,
+        nr35_numControle, nr35_anoControle,
+        situacao = 'S', anotacoes, ambientacao, fotoBase64, dataInativacao, ignorarInvalidez
     } = req.body;
     
-    // ✅ CONVERTER TUDO PARA MAIÚSCULO
-    nome = nome ? nome.toUpperCase() : nome;
-    empresa = empresa ? empresa.toUpperCase() : empresa;
-    funcao = funcao ? funcao.toUpperCase() : funcao;
-    anotacoes = anotacoes ? anotacoes.toUpperCase() : anotacoes;
-    nr12_ferramenta = nr12_ferramenta ? nr12_ferramenta.toUpperCase() : nr12_ferramenta;
+    // ✅ CONVERTER TUDO PARA MAIÚSCULO E SEM ACENTOS
+    nome = normalizarTexto(nome);
+    empresa = normalizarTexto(empresa);
+    funcao = normalizarTexto(funcao);
+    anotacoes = normalizarTexto(anotacoes);
+    nr12_ferramenta = normalizarTexto(nr12_ferramenta);
     
-    console.log('Campos extraídos (MAIÚSCULO):', {
-        nome, empresa, funcao, celular, cpf, dataEmissao, vencimento,
-        nr06_dataEmissao, nr10_dataEmissao, nr11_dataEmissao, nr12_dataEmissao, nr17_dataEmissao, nr18_dataEmissao, nr20_dataEmissao, nr33_dataEmissao, nr34_dataEmissao, nr35_dataEmissao, epi_dataEmissao,
-        situacao, anotacoes, ambientacao
-    });
-    
-    // Validações (igual ao sistema desktop)
     if (!nome || !empresa || !funcao) {
-        res.status(400).json({ error: 'Nome, Empresa e Função são obrigatórios' });
-        return;
+        return res.status(400).json({ error: 'Nome, Empresa e Função são obrigatórios' });
     }
     
-    // VERIFICAR CPF DUPLICADO - Bloquear CPF duplicado em registros ATIVOS
-    if (cpf && cpf.trim() !== '') {
-        console.log('🔍 Verificando CPF duplicado em registros ativos...');
-        const checkCpfSql = `
-            SELECT id, Nome, Empresa, Situacao FROM SSMA WHERE 
-            CPF = ? AND 
-            Situacao = 'N'
-            LIMIT 1
-        `;
-        
-        db.get(checkCpfSql, [cpf], (err, cpfRow) => {
-            if (err) {
-                console.error('Erro ao verificar CPF:', err);
-                res.status(500).json({ error: 'Erro ao verificar CPF' });
-                return;
-            }
-            
+    // ============ VALIDAÇÃO DE CARGA HORÁRIA DIÁRIA (MÁX 8H) ============
+    const datasTrabalho = {};
+    const nrsParaVerificar = [
+        { key: 'nr06', data: nr06_dataEmissao },
+        { key: 'nr10', data: nr10_dataEmissao },
+        { key: 'nr11', data: nr11_dataEmissao },
+        { key: 'nr12', data: nr12_dataEmissao },
+        { key: 'nr17', data: nr17_dataEmissao },
+        { key: 'nr18', data: nr18_dataEmissao },
+        { key: 'nr20', data: nr20_dataEmissao },
+        { key: 'nr33', data: nr33_dataEmissao },
+        { key: 'nr34', data: nr34_dataEmissao },
+        { key: 'nr35', data: nr35_dataEmissao },
+        { key: 'epi', data: epi_dataEmissao }
+    ];
+
+    nrsParaVerificar.forEach(item => {
+        if (item.data && item.data.trim() !== '') {
+            if (!datasTrabalho[item.data]) datasTrabalho[item.data] = { total: 0, cursos: [] };
+            const horas = NR_DURATIONS[item.key] || 0;
+            datasTrabalho[item.data].total += horas;
+            datasTrabalho[item.data].cursos.push(`${item.key.toUpperCase()} (${horas}h)`);
+        }
+    });
+
+    for (const data in datasTrabalho) {
+        // Validação de carga horária removida do backend a pedido do usuário.
+        // O bloqueio agora é visual (marca d'água de INVÁLIDO) no certificado pelo frontend.
+    }
+    // ============ FIM VALIDAÇÃO CARGA HORÁRIA ============
+    
+    
+    try {
+        // VERIFICAR CPF DUPLICADO
+        if (cpf && cpf.trim() !== '') {
+            const cpfRow = await db.get("SELECT id, Nome, Empresa FROM SSMA WHERE CPF = ? AND Situacao = 'N' LIMIT 1", [cpf]);
             if (cpfRow) {
-                console.log('⚠️ CPF DUPLICADO DETECTADO! ID:', cpfRow.id, 'Nome:', cpfRow.Nome);
-                res.status(409).json({ 
-                    error: `CPF já cadastrado para ${cpfRow.Nome} (${cpfRow.Empresa}) - Registro Ativo`,
+                return res.status(409).json({ 
+                    error: `CPF já cadastrado para ${cpfRow.Nome} (${cpfRow.Empresa})`,
                     duplicateId: cpfRow.id,
-                    duplicateStatus: cpfRow.Situacao,
-                    duplicateName: cpfRow.Nome,
                     duplicateType: 'cpf'
                 });
-                return;
-            }
-            
-            console.log('✅ CPF disponível. Verificando duplicata de nome...');
-            verificarDuplicataNome();
-        });
-    } else {
-        // Se não tem CPF, pula direto para verificação de nome
-        verificarDuplicataNome();
-    }
-    
-    function verificarDuplicataNome() {
-        // VERIFICAR DUPLICATA - Bloquear registros com mesmo Nome + Empresa + Função (as 3 juntas)
-        console.log('🔍 Verificando duplicata por Nome, Empresa e Função...');
-        const checkDuplicataSql = `
-            SELECT id, Situacao FROM SSMA WHERE 
-            Nome = ? AND 
-            Empresa = ? AND
-            Funcao = ?
-            LIMIT 1
-        `;
-        
-        const checkParams = [nome, empresa, funcao];
-        
-        db.get(checkDuplicataSql, checkParams, (err, row) => {
-            if (err) {
-                console.error('Erro ao verificar duplicata:', err);
-                res.status(500).json({ error: 'Erro ao verificar duplicata' });
-                return;
-            }
-            
-            if (row) {
-                const statusText = row.Situacao === 'N' ? 'Ativo' : 'Inativo';
-                console.log('⚠️ DUPLICATA DETECTADA! ID:', row.id, 'Status:', statusText);
-                res.status(409).json({ 
-                    error: `Registro duplicado já existe`,
-                    duplicateId: row.id,
-                    duplicateStatus: row.Situacao,
-                    duplicateType: 'nome'
-                });
-                return;
-            }
-            
-            console.log('✅ Nenhuma duplicata encontrada. Prosseguindo com o salvamento...');
-            salvarRegistro();
-        });
-    }
-    
-    function salvarRegistro() {
-        
-        // Converter foto de base64 se existir
-        let fotoBuffer = null;
-        if (fotoBase64 && fotoBase64.length > 0) {
-            try {
-                fotoBuffer = Buffer.from(fotoBase64, 'base64');
-                console.log('📸 Foto convertida de base64:', fotoBuffer.length, 'bytes');
-            } catch (err) {
-                console.error('Erro ao converter base64:', err);
-                return res.status(400).json({ error: 'Erro ao processar foto' });
             }
         }
-    
+        
+        // VERIFICAR UNICIDADE DE NÚMERO DE CONTROLE POR ANO (Para NRs 06, 12, 18, 20, 33, 35)
+        const nrsValidar = [
+            { key: 'Nr06', num: nr06_numControle, ano: nr06_anoControle, label: 'NR-06' },
+            { key: 'Nr11', num: nr11_numControle, ano: nr11_anoControle, label: 'NR-11' },
+            { key: 'Nr12', num: nr12_numControle, ano: nr12_anoControle, label: 'NR-12' },
+            { key: 'Nr18', num: nr18_numControle, ano: nr18_anoControle, label: 'NR-18' },
+            { key: 'Nr20', num: nr20_numControle, ano: nr20_anoControle, label: 'NR-20' },
+            { key: 'Nr33', num: nr33_numControle, ano: nr33_anoControle, label: 'NR-33' },
+            { key: 'Nr35', num: nr35_numControle, ano: nr35_anoControle, label: 'NR-35' }
+        ];
+
+        for (const nr of nrsValidar) {
+            if (nr.num && nr.ano) {
+                const dupCert = await db.get(`SELECT id, Nome FROM SSMA WHERE ${nr.key}_NumControle = ? AND ${nr.key}_AnoControle = ? LIMIT 1`, [nr.num, nr.ano]);
+                if (dupCert) {
+                    return res.status(409).json({ 
+                        error: `O número de controle ${nr.num} para o ano ${nr.ano} já está em uso na ${nr.label} (Funcionário ID: ${dupCert.id} - ${dupCert.Nome})`,
+                        duplicateId: dupCert.id,
+                        duplicateType: 'controle_nr'
+                    });
+                }
+            }
+        }
+        
+        // VERIFICAR DUPLICATA NOME + EMPRESA + FUNÇÃO
+        const dupRow = await db.get("SELECT id FROM SSMA WHERE Nome = ? AND Empresa = ? AND Funcao = ? LIMIT 1", [nome, empresa, funcao]);
+        if (dupRow) {
+            return res.status(409).json({ 
+                error: `Registro duplicado já existe`,
+                duplicateId: dupRow.id,
+                duplicateType: 'nome'
+            });
+        }
+        
+        let fotoBuffer = fotoBase64 ? Buffer.from(fotoBase64, 'base64') : null;
+        
         const sql = `
             INSERT INTO SSMA (
                 Nome, Empresa, Funcao, Celular, CPF, DataEmissao, Vencimento,
-                Nr06_DataEmissao, Nr06_Vencimento, Nr06_Status,
+                Nr06_DataEmissao, Nr06_Vencimento, Nr06_Status, Nr06_Validade2Anos,
                 Nr10_DataEmissao, Nr10_Vencimento, Nr10_Status,
                 Nr11_DataEmissao, Nr11_Vencimento, Nr11_Status,
-                Nr12_DataEmissao, Nr12_Vencimento, Nr12_Status, Nr12_Ferramenta,
+                Nr12_DataEmissao, NR12_Vencimento, Nr12_Status, Nr12_Ferramenta,
                 Nr17_DataEmissao, Nr17_Vencimento, Nr17_Status,
-                Nr18_DataEmissao, Nr18_Vencimento, Nr18_Status,
+                Nr18_DataEmissao, NR18_Vencimento, Nr18_Status,
                 Nr20_DataEmissao, Nr20_Vencimento, Nr20_Status,
-                Nr33_DataEmissao, Nr33_Vencimento, Nr33_Status,
+                Nr33_DataEmissao, NR33_Vencimento, Nr33_Status,
                 Nr34_DataEmissao, Nr34_Vencimento, Nr34_Status,
-                Nr35_DataEmissao, Nr35_Vencimento, Nr35_Status,
-                Epi_DataEmissao, epiVencimento, EpiStatus,
-                Situacao, Anotacoes, Ambientacao, Foto
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                Nr35_DataEmissao, NR35_Vencimento, Nr35_Status,
+                Epi_DataEmissao, epiVencimento, EpiStatus, Epi_Validade8Meses,
+                Nr06_NumControle, Nr06_AnoControle,
+                Nr11_NumControle, Nr11_AnoControle,
+                Nr12_NumControle, Nr12_AnoControle,
+                Nr17_NumControle, Nr17_AnoControle,
+                Nr18_NumControle, Nr18_AnoControle,
+                Nr20_NumControle, Nr20_AnoControle,
+                Nr33_NumControle, Nr33_AnoControle,
+                Nr35_NumControle, Nr35_AnoControle,
+                Situacao, Anotacoes, Ambientacao, DataInativacao, Foto, IgnorarInvalidez
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
         
         const params = [
             nome, empresa, funcao, celular, cpf, dataEmissao, vencimento,
-            nr06_dataEmissao, nr06_vencimento, nr06_status,
+            nr06_dataEmissao, nr06_vencimento, nr06_status, nr06_validade2anos || 0,
             nr10_dataEmissao, nr10_vencimento, nr10_status,
             nr11_dataEmissao, nr11_vencimento, nr11_status,
             nr12_dataEmissao, nr12_vencimento, nr12_status, nr12_ferramenta,
@@ -1751,51 +2146,42 @@ app.post('/api/ssma', (req, res) => {
             nr33_dataEmissao, nr33_vencimento, nr33_status,
             nr34_dataEmissao, nr34_vencimento, nr34_status,
             nr35_dataEmissao, nr35_vencimento, nr35_status,
-            epi_dataEmissao, epi_vencimento, epi_status,
-            situacao, anotacoes, ambientacao, fotoBuffer
+            epi_dataEmissao, epi_vencimento, epi_status, req.body.epi_validade8meses || 0,
+            nr06_numControle, nr06_anoControle,
+            nr11_numControle, nr11_anoControle,
+            nr12_numControle, nr12_anoControle,
+            nr17_numControle, nr17_anoControle,
+            nr18_numControle, nr18_anoControle,
+            nr20_numControle, nr20_anoControle,
+            nr33_numControle, nr33_anoControle,
+            nr35_numControle, nr35_anoControle,
+            situacao, anotacoes, ambientacao, dataInativacao || null, fotoBuffer, ignorarInvalidez || 'N'
         ];
         
-        console.log('Params array length:', params.length);
-        console.log('Params:', params);
-        
-        db.run(sql, params, function(err) {
-            if (err) {
-                // Capturar erro de UNIQUE constraint
-                if (err.code === 'SQLITE_CONSTRAINT' && err.message.includes('UNIQUE')) {
-                    console.log('⚠️ UNIQUE constraint violado:', err.message);
-                    res.status(409).json({ 
-                        error: `Registro duplicado já existe`,
-                        duplicateId: null,
-                        duplicateStatus: null
-                    });
-                    return;
-                }
-                
-                console.error('Erro ao inserir:', err);
-                res.status(500).json({ error: err.message });
-                return;
-            }
-            
-            console.log('✅ Registro inserido com sucesso! ID:', this.lastID);
-            res.json({
-                id: this.lastID,
-                message: 'Registro criado com sucesso'
-            });
-        });
+        const result = await db.run(sql, params);
+        await registrarLog(req, 'Cadastrar Funcionário', `Cadastrou o funcionário [${nome}] na empresa ${empresa} (Função: ${funcao})`);
+        res.json({ id: result.lastID, message: 'Registro criado com sucesso' });
+    } catch (err) {
+        console.error('Erro ao inserir:', err);
+        res.status(500).json({ error: err.message });
     }
 });
 
 // PUT - Atualizar registro
-app.put('/api/ssma/:id', (req, res) => {
+app.put('/api/ssma/:id', async (req, res) => {
     const { id } = req.params;
     
-    console.log('=== ATUALIZANDO REGISTRO ===');
-    console.log('ID:', id);
-    console.log('Body recebido:', req.body);
+    // Normalize body key casing for all courses to prevent any database updates from going blank
+    for (const key of Object.keys(req.body)) {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey !== key && req.body[key] !== undefined && req.body[lowerKey] === undefined) {
+            req.body[lowerKey] = req.body[key];
+        }
+    }
     
     let {
         nome, empresa, funcao, celular, cpf, dataEmissao, vencimento,
-        nr06_dataEmissao, nr06_vencimento, nr06_status,
+        nr06_dataEmissao, nr06_vencimento, nr06_status, nr06_validade2anos,
         nr10_dataEmissao, nr10_vencimento, nr10_status,
         nr11_dataEmissao, nr11_vencimento, nr11_status,
         nr12_dataEmissao, nr12_vencimento, nr12_status, nr12_ferramenta,
@@ -1805,300 +2191,364 @@ app.put('/api/ssma/:id', (req, res) => {
         nr33_dataEmissao, nr33_vencimento, nr33_status,
         nr34_dataEmissao, nr34_vencimento, nr34_status,
         nr35_dataEmissao, nr35_vencimento, nr35_status,
+        nr06_numControle, nr06_anoControle,
+        nr11_numControle, nr11_anoControle,
+        nr12_numControle, nr12_anoControle,
+        nr18_numControle, nr18_anoControle,
+        nr20_numControle, nr20_anoControle,
+        nr33_numControle, nr33_anoControle,
+        nr35_numControle, nr35_anoControle,
+        nr17_numControle, nr17_anoControle,
         epi_dataEmissao, epi_vencimento, epi_status,
-        situacao, anotacoes, ambientacao, fotoBase64, removerFoto
+        situacao, anotacoes, ambientacao, fotoBase64, removerFoto, dataInativacao, ignorarInvalidez
     } = req.body;
     
-    // ✅ CONVERTER TUDO PARA MAIÚSCULO
-    nome = nome ? nome.toUpperCase() : nome;
-    empresa = empresa ? empresa.toUpperCase() : empresa;
-    funcao = funcao ? funcao.toUpperCase() : funcao;
-    anotacoes = anotacoes ? anotacoes.toUpperCase() : anotacoes;
-    nr12_ferramenta = nr12_ferramenta ? nr12_ferramenta.toUpperCase() : nr12_ferramenta;
+    // ✅ CONVERTER TUDO PARA MAIÚSCULO E SEM ACENTOS
+    nome = normalizarTexto(nome);
+    empresa = normalizarTexto(empresa);
+    funcao = normalizarTexto(funcao);
+    anotacoes = normalizarTexto(anotacoes);
+    nr12_ferramenta = normalizarTexto(nr12_ferramenta);
     
-    // Validações
     if (!nome || !empresa || !funcao) {
-        res.status(400).json({ error: 'Nome, Empresa e Função são obrigatórios' });
-        return;
+        return res.status(400).json({ error: 'Nome, Empresa e Função são obrigatórios' });
     }
+
+    // ============ VALIDAÇÃO DE CARGA HORÁRIA DIÁRIA (MÁX 8H) ============
+    const datasTrabalho = {};
+    const nrsParaVerificar = [
+        { key: 'nr06', data: nr06_dataEmissao },
+        { key: 'nr10', data: nr10_dataEmissao },
+        { key: 'nr11', data: nr11_dataEmissao },
+        { key: 'nr12', data: nr12_dataEmissao },
+        { key: 'nr17', data: nr17_dataEmissao },
+        { key: 'nr18', data: nr18_dataEmissao },
+        { key: 'nr20', data: nr20_dataEmissao },
+        { key: 'nr33', data: nr33_dataEmissao },
+        { key: 'nr34', data: nr34_dataEmissao },
+        { key: 'nr35', data: nr35_dataEmissao },
+        { key: 'epi', data: epi_dataEmissao }
+    ];
+
+    nrsParaVerificar.forEach(item => {
+        if (item.data && item.data.trim() !== '') {
+            if (!datasTrabalho[item.data]) datasTrabalho[item.data] = { total: 0, cursos: [] };
+            const horas = NR_DURATIONS[item.key] || 0;
+            datasTrabalho[item.data].total += horas;
+            datasTrabalho[item.data].cursos.push(`${item.key.toUpperCase()} (${horas}h)`);
+        }
+    });
+
+    for (const data in datasTrabalho) {
+        // Validação de carga horária removida do backend a pedido do usuário.
+        // O bloqueio agora é visual (marca d'água de INVÁLIDO) no certificado pelo frontend.
+    }
+    // ============ FIM VALIDAÇÃO CARGA HORÁRIA ============
     
-    // VERIFICAR CPF DUPLICADO - Bloquear CPF duplicado em registros ATIVOS (exceto o próprio registro)
-    if (cpf && cpf.trim() !== '') {
-        console.log('🔍 Verificando CPF duplicado em registros ativos (excluindo registro atual)...');
-        const checkCpfSql = `
-            SELECT id, Nome, Empresa, Situacao FROM SSMA WHERE 
-            CPF = ? AND 
-            Situacao = 'N' AND
-            id != ?
-            LIMIT 1
-        `;
+    
+    try {
+        const oldRow = await db.get('SELECT * FROM SSMA WHERE id = ?', [id]);
         
-        db.get(checkCpfSql, [cpf, id], (err, cpfRow) => {
-            if (err) {
-                console.error('Erro ao verificar CPF:', err);
-                res.status(500).json({ error: 'Erro ao verificar CPF' });
-                return;
-            }
-            
+        // VERIFICAR CPF DUPLICADO (exceto o próprio)
+        if (cpf && cpf.trim() !== '') {
+            const cpfRow = await db.get("SELECT id, Nome, Empresa FROM SSMA WHERE CPF = ? AND Situacao = 'N' AND id != ? LIMIT 1", [cpf, id]);
             if (cpfRow) {
-                console.log('⚠️ CPF DUPLICADO DETECTADO! ID:', cpfRow.id, 'Nome:', cpfRow.Nome);
-                res.status(409).json({ 
-                    error: `CPF já cadastrado para ${cpfRow.Nome} (${cpfRow.Empresa}) - Registro Ativo`,
+                return res.status(409).json({ 
+                    error: `CPF já cadastrado para ${cpfRow.Nome} (${cpfRow.Empresa})`,
                     duplicateId: cpfRow.id,
-                    duplicateStatus: cpfRow.Situacao,
-                    duplicateName: cpfRow.Nome,
                     duplicateType: 'cpf'
                 });
-                return;
             }
-            
-            console.log('✅ CPF disponível. Verificando duplicata de nome...');
-            verificarDuplicataNome();
-        });
-    } else {
-        // Se não tem CPF, pula direto para verificação de nome
-        verificarDuplicataNome();
-    }
-    
-    function verificarDuplicataNome() {
-        // VERIFICAR DUPLICATA - Bloquear se já existe outro registro com mesmo Nome + Empresa + Função
-        console.log('🔍 Verificando duplicata por Nome, Empresa e Função (excluindo o registro atual)...');
-        const checkDuplicataSql = `
-            SELECT id, Situacao FROM SSMA WHERE 
-            Nome = ? AND 
-            Empresa = ? AND
-            Funcao = ? AND
-            id != ?
-            LIMIT 1
-        `;
-        
-        db.get(checkDuplicataSql, [nome, empresa, funcao, id], (err, row) => {
-            if (err) {
-                console.error('Erro ao verificar duplicata:', err);
-                res.status(500).json({ error: 'Erro ao verificar duplicata' });
-                return;
-            }
-            
-            if (row) {
-                const statusText = row.Situacao === 'N' ? 'Ativo' : 'Inativo';
-                console.log('⚠️ DUPLICATA DETECTADA! ID:', row.id, 'Status:', statusText);
-                res.status(409).json({ 
-                    error: `Registro duplicado já existe`,
-                    duplicateId: row.id,
-                    duplicateStatus: row.Situacao,
-                    duplicateType: 'nome'
-                });
-                return;
-            }
-            
-            // Prosseguir com a atualização
-            proceedWithUpdate();
-        });
-    }
-    
-    function proceedWithUpdate() {
-    // PRIMEIRO: Buscar dados atuais para detectar mudança de função
-    db.get('SELECT Funcao, Nome FROM SSMA WHERE id = ?', [id], (err, dadosAtuais) => {
-        if (err) {
-            console.error('Erro ao buscar dados atuais:', err);
-            res.status(500).json({ error: err.message });
-            return;
         }
         
-        const funcaoAnterior = dadosAtuais ? dadosAtuais.Funcao : null;
-        const funcaoNova = funcao;
-        const mudouFuncao = funcaoAnterior && funcaoNova && funcaoAnterior.toUpperCase() !== funcaoNova.toUpperCase();
-        
-        if (mudouFuncao) {
-            console.log(`🔄 MUDANÇA DE FUNÇÃO DETECTADA: ${funcaoAnterior} → ${funcaoNova}`);
-        }
-        
-    let sql = `
-        UPDATE SSMA SET
-            Nome = ?, Empresa = ?, Funcao = ?, Celular = ?, CPF = ?, DataEmissao = ?, Vencimento = ?,
-            Nr06_DataEmissao = ?, Nr06_Vencimento = ?, Nr06_Status = ?,
-            Nr10_DataEmissao = ?, Nr10_Vencimento = ?, Nr10_Status = ?,
-            Nr11_DataEmissao = ?, Nr11_Vencimento = ?, Nr11_Status = ?,
-            Nr12_DataEmissao = ?, Nr12_Vencimento = ?, Nr12_Status = ?, Nr12_Ferramenta = ?,
-            Nr17_DataEmissao = ?, Nr17_Vencimento = ?, Nr17_Status = ?,
-            Nr18_DataEmissao = ?, Nr18_Vencimento = ?, Nr18_Status = ?,
-            Nr20_DataEmissao = ?, Nr20_Vencimento = ?, Nr20_Status = ?,
-            Nr33_DataEmissao = ?, Nr33_Vencimento = ?, Nr33_Status = ?,
-            Nr34_DataEmissao = ?, Nr34_Vencimento = ?, Nr34_Status = ?,
-            Nr35_DataEmissao = ?, Nr35_Vencimento = ?, Nr35_Status = ?,
-            Epi_DataEmissao = ?, epiVencimento = ?, EpiStatus = ?,
-            Situacao = ?, Anotacoes = ?, Ambientacao = ?
-    `;
-    
-    let params = [
-        nome, empresa, funcao, celular, cpf, dataEmissao, vencimento,
-        nr06_dataEmissao, nr06_vencimento, nr06_status,
-        nr10_dataEmissao, nr10_vencimento, nr10_status,
-        nr11_dataEmissao, nr11_vencimento, nr11_status,
-        nr12_dataEmissao, nr12_vencimento, nr12_status, nr12_ferramenta,
-        nr17_dataEmissao, nr17_vencimento, nr17_status,
-        nr18_dataEmissao, nr18_vencimento, nr18_status,
-        nr20_dataEmissao, nr20_vencimento, nr20_status,
-        nr33_dataEmissao, nr33_vencimento, nr33_status,
-        nr34_dataEmissao, nr34_vencimento, nr34_status,
-        nr35_dataEmissao, nr35_vencimento, nr35_status,
-        epi_dataEmissao, epi_vencimento, epi_status,
-        situacao, anotacoes, ambientacao
-    ];
-    
-    // Se tem foto nova em base64, converter e incluir na atualização
-    if (fotoBase64 && fotoBase64.length > 0) {
-        try {
-            const fotoBuffer = Buffer.from(fotoBase64, 'base64');
-            console.log('📸 Foto recebida em base64 com', fotoBuffer.length, 'bytes');
-            sql += ', Foto = ?';
-            params.push(fotoBuffer);
-        } catch (err) {
-            console.error('Erro ao converter base64:', err);
-            return res.status(400).json({ error: 'Erro ao processar foto' });
-        }
-    } else if (removerFoto === true) {
-        // Se a flag removerFoto está ativa, limpar a foto do banco
-        console.log('🗑️ Removendo foto do registro');
-        sql += ', Foto = NULL';
-    } else {
-        console.log('⚠️ Nenhuma foto nova fornecida, mantendo foto existente');
-    }
-    
-    sql += ' WHERE id = ?';
-    params.push(id);
-    
-    console.log('SQL:', sql);
-    console.log('Params count:', params.length);
-    
-    db.run(sql, params, function(err) {
-        if (err) {
-            // Capturar erro de UNIQUE constraint
-            if (err.code === 'SQLITE_CONSTRAINT' && err.message.includes('UNIQUE')) {
-                console.log('⚠️ UNIQUE constraint violado:', err.message);
-                res.status(409).json({ 
-                    error: `Registro duplicado já existe`,
-                    duplicateId: null,
-                    duplicateStatus: null
-                });
-                return;
-            }
-            
-            console.error('Erro ao atualizar:', err);
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        
-        if (this.changes === 0) {
-            res.status(404).json({ error: 'Registro não encontrado' });
-            return;
-        }
-        
-        console.log('✅ Registro atualizado com sucesso');
-        
-        // Se houve mudança de função, registrar automaticamente
-        if (mudouFuncao) {
-            const hoje = new Date();
-            const diaHoje = hoje.getDate();
-            
-            const sqlMudanca = `
-                INSERT INTO MUDANCA_FUNCAO_PRESENCA (mesAno, funcionarioId, funcionarioNome, funcaoAnterior, funcaoNova, diaInicio, anotacoes)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            `;
-            
-            const anotacaoAuto = `Mudança automática detectada: ${funcaoAnterior} → ${funcaoNova} em ${hoje.toLocaleDateString('pt-BR')}`;
-            
-            db.run(sqlMudanca, [presencaMesAtual, id, nome, funcaoAnterior, funcaoNova, diaHoje, anotacaoAuto], function(errMudanca) {
-                if (errMudanca) {
-                    console.error('❌ Erro ao registrar mudança de função:', errMudanca);
-                } else {
-                    console.log(`✅ Mudança de função registrada automaticamente! ID: ${this.lastID}`);
-                }
-                
-                res.json({ 
-                    message: 'Registro atualizado com sucesso',
-                    mudancaFuncao: true,
-                    funcaoAnterior: funcaoAnterior,
-                    funcaoNova: funcaoNova
-                });
+        // VERIFICAR DUPLICATA NOME (exceto o próprio)
+        const dupRow = await db.get("SELECT id FROM SSMA WHERE Nome = ? AND Empresa = ? AND Funcao = ? AND id != ? LIMIT 1", [nome, empresa, funcao, id]);
+        if (dupRow) {
+            return res.status(409).json({ 
+                error: `Registro duplicado já existe`,
+                duplicateId: dupRow.id,
+                duplicateType: 'nome'
             });
-        } else {
-            res.json({ message: 'Registro atualizado com sucesso' });
         }
-    });
-    }); // Fim do db.get para buscar dados atuais
-    } // Fim da função proceedWithUpdate
+
+        // VERIFICAR UNICIDADE DE NÚMERO DE CONTROLE POR ANO (Para NRs 06, 12, 18, 20, 33, 35) (exceto o próprio)
+        const nrsValidar = [
+            { key: 'Nr06', num: nr06_numControle, ano: nr06_anoControle, label: 'NR-06' },
+            { key: 'Nr11', num: nr11_numControle, ano: nr11_anoControle, label: 'NR-11' },
+            { key: 'Nr12', num: nr12_numControle, ano: nr12_anoControle, label: 'NR-12' },
+            { key: 'Nr18', num: nr18_numControle, ano: nr18_anoControle, label: 'NR-18' },
+            { key: 'Nr20', num: nr20_numControle, ano: nr20_anoControle, label: 'NR-20' },
+            { key: 'Nr33', num: nr33_numControle, ano: nr33_anoControle, label: 'NR-33' },
+            { key: 'Nr35', num: nr35_numControle, ano: nr35_anoControle, label: 'NR-35' }
+        ];
+
+        for (const nr of nrsValidar) {
+            if (nr.num && nr.ano) {
+                const dupCert = await db.get(`SELECT id, Nome FROM SSMA WHERE ${nr.key}_NumControle = ? AND ${nr.key}_AnoControle = ? AND id != ? LIMIT 1`, [nr.num, nr.ano, id]);
+                if (dupCert) {
+                    return res.status(409).json({ 
+                        error: `O número de controle ${nr.num} para o ano ${nr.ano} já está em uso na ${nr.label} (Funcionário ID: ${dupCert.id} - ${dupCert.Nome})`,
+                        duplicateId: dupCert.id,
+                        duplicateType: 'controle_nr'
+                    });
+                }
+            }
+        }
+        
+        // PROTEÇÃO FINAL: Se a Data de Emissão estiver vazia ou nula, limpar completamente todos os campos vinculados!
+        // Mas apenas se a data de emissão estiver explicitamente no body (ou vazia)
+        if (req.body.hasOwnProperty('nr06_dataEmissao') && (!nr06_dataEmissao || nr06_dataEmissao.trim() === '')) { nr06_vencimento = ''; nr06_status = ''; nr06_numControle = ''; nr06_anoControle = ''; }
+        if (req.body.hasOwnProperty('nr10_dataEmissao') && (!nr10_dataEmissao || nr10_dataEmissao.trim() === '')) { nr10_vencimento = ''; nr10_status = ''; }
+        if (req.body.hasOwnProperty('nr11_dataEmissao') && (!nr11_dataEmissao || nr11_dataEmissao.trim() === '')) { nr11_vencimento = ''; nr11_status = ''; nr11_numControle = ''; nr11_anoControle = ''; }
+        if (req.body.hasOwnProperty('nr12_dataEmissao') && (!nr12_dataEmissao || nr12_dataEmissao.trim() === '')) { nr12_vencimento = ''; nr12_status = ''; nr12_ferramenta = ''; nr12_numControle = ''; nr12_anoControle = ''; }
+        if (req.body.hasOwnProperty('nr17_dataEmissao') && (!nr17_dataEmissao || nr17_dataEmissao.trim() === '')) { nr17_vencimento = ''; nr17_status = ''; nr17_numControle = ''; nr17_anoControle = ''; }
+        if (req.body.hasOwnProperty('nr18_dataEmissao') && (!nr18_dataEmissao || nr18_dataEmissao.trim() === '')) { nr18_vencimento = ''; nr18_status = ''; nr18_numControle = ''; nr18_anoControle = ''; }
+        if (req.body.hasOwnProperty('nr20_dataEmissao') && (!nr20_dataEmissao || nr20_dataEmissao.trim() === '')) { nr20_vencimento = ''; nr20_status = ''; nr20_numControle = ''; nr20_anoControle = ''; }
+        if (req.body.hasOwnProperty('nr33_dataEmissao') && (!nr33_dataEmissao || nr33_dataEmissao.trim() === '')) { nr33_vencimento = ''; nr33_status = ''; nr33_numControle = ''; nr33_anoControle = ''; }
+        if (req.body.hasOwnProperty('nr34_dataEmissao') && (!nr34_dataEmissao || nr34_dataEmissao.trim() === '')) { nr34_vencimento = ''; nr34_status = ''; }
+        if (req.body.hasOwnProperty('nr35_dataEmissao') && (!nr35_dataEmissao || nr35_dataEmissao.trim() === '')) { nr35_vencimento = ''; nr35_status = ''; nr35_numControle = ''; nr35_anoControle = ''; }
+        if (req.body.hasOwnProperty('epi_dataEmissao') && (!epi_dataEmissao || epi_dataEmissao.trim() === '')) { epi_vencimento = ''; epi_status = ''; }
+
+        // Mapeamento de campos para construção dinâmica do SQL
+        const camposUpdate = {
+            Nome: nome, Empresa: empresa, Funcao: funcao, Celular: celular, CPF: cpf, DataEmissao: dataEmissao, Vencimento: vencimento,
+            Nr06_DataEmissao: nr06_dataEmissao, Nr06_Vencimento: nr06_vencimento, Nr06_Status: nr06_status, Nr06_Validade2Anos: nr06_validade2anos ?? 0,
+            Nr10_DataEmissao: nr10_dataEmissao, Nr10_Vencimento: nr10_vencimento, Nr10_Status: nr10_status,
+            Nr11_DataEmissao: nr11_dataEmissao, Nr11_Vencimento: nr11_vencimento, Nr11_Status: nr11_status,
+            Nr12_DataEmissao: nr12_dataEmissao, NR12_Vencimento: nr12_vencimento, Nr12_Status: nr12_status, Nr12_Ferramenta: nr12_ferramenta,
+            Nr17_DataEmissao: nr17_dataEmissao, Nr17_Vencimento: nr17_vencimento, Nr17_Status: nr17_status,
+            Nr18_DataEmissao: nr18_dataEmissao, NR18_Vencimento: nr18_vencimento, Nr18_Status: nr18_status,
+            Nr20_DataEmissao: nr20_dataEmissao, Nr20_Vencimento: nr20_vencimento, Nr20_Status: nr20_status,
+            Nr33_DataEmissao: nr33_dataEmissao, NR33_Vencimento: nr33_vencimento, Nr33_Status: nr33_status,
+            Nr34_DataEmissao: nr34_dataEmissao, Nr34_Vencimento: nr34_vencimento, Nr34_Status: nr34_status,
+            Nr35_DataEmissao: nr35_dataEmissao, NR35_Vencimento: nr35_vencimento, Nr35_Status: nr35_status,
+            Epi_DataEmissao: epi_dataEmissao, epiVencimento: epi_vencimento, EpiStatus: epi_status, 
+            Epi_Validade8Meses: req.body.epi_validade8meses ?? 0,
+            Situacao: situacao, Anotacoes: anotacoes, Ambientacao: ambientacao, DataInativacao: dataInativacao, IgnorarInvalidez: ignorarInvalidez || 'N'
+        };
+
+        // Adicionar campos de controle APENAS se estiverem presentes no body (prevenir overwrite com undefined)
+        if (req.body.hasOwnProperty('nr06_numControle')) camposUpdate.Nr06_NumControle = nr06_numControle;
+        if (req.body.hasOwnProperty('nr06_anoControle')) camposUpdate.Nr06_AnoControle = nr06_anoControle;
+        if (req.body.hasOwnProperty('nr12_numControle')) camposUpdate.Nr12_NumControle = nr12_numControle;
+        if (req.body.hasOwnProperty('nr12_anoControle')) camposUpdate.Nr12_AnoControle = nr12_anoControle;
+        if (req.body.hasOwnProperty('nr18_numControle')) camposUpdate.Nr18_NumControle = nr18_numControle;
+        if (req.body.hasOwnProperty('nr18_anoControle')) camposUpdate.Nr18_AnoControle = nr18_anoControle;
+        if (req.body.hasOwnProperty('nr20_numControle')) camposUpdate.Nr20_NumControle = nr20_numControle;
+        if (req.body.hasOwnProperty('nr20_anoControle')) camposUpdate.Nr20_AnoControle = nr20_anoControle;
+        if (req.body.hasOwnProperty('nr11_numControle')) camposUpdate.Nr11_NumControle = nr11_numControle;
+        if (req.body.hasOwnProperty('nr11_anoControle')) camposUpdate.Nr11_AnoControle = nr11_anoControle;
+        if (req.body.hasOwnProperty('nr17_numControle')) camposUpdate.Nr17_NumControle = nr17_numControle;
+        if (req.body.hasOwnProperty('nr17_anoControle')) camposUpdate.Nr17_AnoControle = nr17_anoControle;
+        if (req.body.hasOwnProperty('nr33_numControle')) camposUpdate.Nr33_NumControle = nr33_numControle;
+        if (req.body.hasOwnProperty('nr33_anoControle')) camposUpdate.Nr33_AnoControle = nr33_anoControle;
+        if (req.body.hasOwnProperty('nr35_numControle')) camposUpdate.Nr35_NumControle = nr35_numControle;
+        if (req.body.hasOwnProperty('nr35_anoControle')) camposUpdate.Nr35_AnoControle = nr35_anoControle;
+
+        // Construir a cláusula SET e os parâmetros dinamicamente
+        const setParts = [];
+        const params = [];
+
+        for (const [col, val] of Object.entries(camposUpdate)) {
+            if (val !== undefined) {
+                setParts.push(`${col} = ?`);
+                params.push(val);
+            }
+        }
+
+        if (removerFoto) {
+            setParts.push('Foto = NULL');
+        } else if (fotoBase64) {
+            setParts.push('Foto = ?');
+            params.push(Buffer.from(fotoBase64, 'base64'));
+        }
+
+        if (setParts.length === 0) {
+            return res.json({ success: true, message: 'Nenhuma alteração necessária' });
+        }
+
+        const alteracoes = [];
+        if (oldRow) {
+            const normalizedOld = normalizarCasingRow({ ...oldRow });
+            
+            for (const [col, newVal] of Object.entries(camposUpdate)) {
+                if (newVal !== undefined) {
+                    let oldVal = normalizedOld[col];
+                    if (oldVal === undefined) {
+                        const lowerCol = col.toLowerCase();
+                        for (const key of Object.keys(normalizedOld)) {
+                            if (key.toLowerCase() === lowerCol) {
+                                oldVal = normalizedOld[key];
+                                break;
+                            }
+                        }
+                    }
+                    
+                    let oldStr = (oldVal === null || oldVal === undefined) ? '' : String(oldVal).trim();
+                    let newStr = (newVal === null || newVal === undefined) ? '' : String(newVal).trim();
+                    
+                    const normalizeDate = (val) => {
+                        if (!val) return '';
+                        if (val.includes('T')) return val.split('T')[0];
+                        return val;
+                    };
+                    
+                    if (col.toLowerCase().includes('dataemissao') || col.toLowerCase().includes('vencimento')) {
+                        if (normalizeDate(oldStr) === normalizeDate(newStr)) continue;
+                    }
+                    
+                    if (oldStr !== newStr) {
+                        let colLabel = col;
+                        if (col === 'Nome') colLabel = 'Nome';
+                        else if (col === 'Empresa') colLabel = 'Empresa';
+                        else if (col === 'Funcao') colLabel = 'Função';
+                        else if (col === 'Celular') colLabel = 'Celular';
+                        else if (col === 'CPF') colLabel = 'CPF';
+                        else if (col === 'Anotacoes') colLabel = 'Anotações';
+                        else if (col === 'Ambientacao') colLabel = 'Ambientação';
+                        else if (col === 'Situacao') colLabel = 'Situação';
+                        else {
+                            colLabel = col.replace('_', ' - ');
+                        }
+                        
+                        const formatValDisplay = (val) => {
+                            if (!val) return 'vazio';
+                            if (/^\d{4}-\d{2}-\d{2}/.test(val)) {
+                                const parts = val.split('T')[0].split('-');
+                                if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+                            }
+                            return `'${val}'`;
+                        };
+                        
+                        alteracoes.push(`${colLabel} de ${formatValDisplay(oldStr)} para ${formatValDisplay(newStr)}`);
+                    }
+                }
+            }
+        }
+        
+        let logDetalhes = `Editou dados do funcionário [${nome}] (Empresa: ${empresa}, Função: ${funcao})`;
+        if (alteracoes.length > 0) {
+            logDetalhes += ` | Alterações: ${alteracoes.join(', ')}`;
+        }
+
+        const sql = `UPDATE SSMA SET ${setParts.join(', ')} WHERE id = ?`;
+        params.push(id);
+
+        await db.run(sql, params);
+        await registrarLog(req, 'Atualizar Funcionário', logDetalhes);
+        res.json({ success: true, message: 'Registro atualizado com sucesso' });
+    } catch (err) {
+        console.error('Erro ao atualizar:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
+// PATCH - Atualização parcial (ex: Epi_Dados)
+app.patch('/api/ssma/:id', async (req, res) => {
+    const { id } = req.params;
+    const body = req.body;
+    
+    if (Object.keys(body).length === 0) {
+        return res.status(400).json({ error: 'Nenhum dado informado para atualização' });
+    }
+    
+    const setParts = [];
+    const params = [];
+    
+    for (const [col, val] of Object.entries(body)) {
+        // Lista de colunas permitidas para evitar SQL Injection (simplificado para o contexto)
+        const allowedCols = [
+            'Epi_Dados', 'Epi_Setor', 'IgnorarInvalidez',
+            'Nr06_NumControle', 'Nr06_AnoControle',
+            'Nr11_NumControle', 'Nr11_AnoControle',
+            'Nr12_NumControle', 'Nr12_AnoControle',
+            'Nr17_NumControle', 'Nr17_AnoControle',
+            'Nr18_NumControle', 'Nr18_AnoControle',
+            'Nr20_NumControle', 'Nr20_AnoControle',
+            'Nr33_NumControle', 'Nr33_AnoControle',
+            'Nr35_NumControle', 'Nr35_AnoControle'
+        ];
+        if (allowedCols.includes(col)) {
+            setParts.push(`${col} = ?`);
+            params.push(val);
+        }
+    }
+    
+    if (setParts.length === 0) {
+        return res.status(400).json({ error: 'Colunas inválidas para atualização parcial' });
+    }
+    
+    const sql = `UPDATE SSMA SET ${setParts.join(', ')} WHERE id = ?`;
+    params.push(id);
+    
+    try {
+        const result = await db.run(sql, params);
+        if (result.changes === 0) return res.status(404).json({ error: 'Registro não encontrado' });
+        res.json({ success: true, message: 'Registro atualizado parcialmente' });
+    } catch (err) {
+        console.error('Erro no PATCH /api/ssma:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
 // DELETE - Excluir registro
-app.delete('/api/ssma/:id', (req, res) => {
+app.delete('/api/ssma/:id', async (req, res) => {
     const { id } = req.params;
     
-    db.run('DELETE FROM SSMA WHERE id = ?', [id], function(err) {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
+    try {
+        const row = await db.get('SELECT Nome FROM SSMA WHERE id = ?', [id]);
+        if (!row) return res.status(404).json({ error: 'Registro não encontrado' });
         
-        if (this.changes === 0) {
-            res.status(404).json({ error: 'Registro não encontrado' });
-            return;
-        }
-        
+        await db.run('DELETE FROM SSMA WHERE id = ?', [id]);
+        await registrarLog(req, 'Excluir Funcionário', `Excluiu permanentemente o funcionário [${row.Nome}]`);
         res.json({ message: 'Registro excluído com sucesso' });
-    });
+    } catch (err) {
+        console.error('Erro ao excluir funcionário:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // PUT - Alternar situação (Ativo/Inativo) com data de inativação
-app.put('/api/ssma/:id/toggle-situacao', (req, res) => {
+app.put('/api/ssma/:id/toggle-situacao', async (req, res) => {
     const { id } = req.params;
     const { situacao, dataInativacao } = req.body;
     
-    console.log('=== ALTERANDO SITUAÇÃO ===');
-    console.log('ID:', id);
-    console.log('Nova situação:', situacao);
-    console.log('Data inativação:', dataInativacao);
-    
     // Validar situação
     if (!situacao || !['S', 'N'].includes(situacao)) {
-        res.status(400).json({ error: 'Situação inválida. Use S para Ativo ou N para Inativo' });
-        return;
+        return res.status(400).json({ error: 'Situação inválida. Use S para Cancelado ou N para Ativo' });
     }
     
-    // Preparar SQL baseado na situação
-    let sql, params;
-    
-    if (situacao === 'N') {
-        // Inativando - registrar data de inativação
-        sql = 'UPDATE SSMA SET Situacao = ?, DataInativacao = ? WHERE id = ?';
-        params = [situacao, dataInativacao || new Date().toISOString(), id];
-    } else {
-        // Ativando - limpar data de inativação
-        sql = 'UPDATE SSMA SET Situacao = ?, DataInativacao = NULL WHERE id = ?';
-        params = [situacao, id];
-    }
-    
-    db.run(sql, params, function(err) {
-        if (err) {
-            console.error('Erro ao atualizar situação:', err);
-            res.status(500).json({ error: err.message });
-            return;
+    try {
+        const row = await db.get('SELECT Nome FROM SSMA WHERE id = ?', [id]);
+        if (!row) return res.status(404).json({ error: 'Registro não encontrado' });
+        
+        let sql, params;
+        if (situacao === 'S') {
+            // Cancelando/Inativando (S = Cancelado) - registrar data de inativação
+            sql = 'UPDATE SSMA SET Situacao = ?, DataInativacao = ? WHERE id = ?';
+            params = [situacao, dataInativacao || new Date().toISOString(), id];
+        } else {
+            // Ativando (N = Ativo) - limpar data de inativação
+            sql = 'UPDATE SSMA SET Situacao = ?, DataInativacao = NULL WHERE id = ?';
+            params = [situacao, id];
         }
         
-        if (this.changes === 0) {
-            res.status(404).json({ error: 'Registro não encontrado' });
-            return;
-        }
+        await db.run(sql, params);
         
-        const statusText = situacao === 'N' ? 'Ativo' : 'Inativo';
-        console.log(`Situação alterada para: ${statusText}`);
+        const statusText = situacao === 'N' ? 'Ativo' : 'Cancelado';
+        const acaoDesc = situacao === 'N' ? 'Ativar Funcionário' : 'Inativar Funcionário';
+        await registrarLog(req, acaoDesc, `${situacao === 'N' ? 'Ativou' : 'Inativou'} o funcionário [${row.Nome}]`);
         
         res.json({
             message: `Situação alterada para ${statusText}`,
             situacao: situacao,
             dataInativacao: situacao === 'S' ? (dataInativacao || new Date().toISOString()) : null
         });
-    });
+    } catch (err) {
+        console.error('Erro ao atualizar situação:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // PUT - Atualizar apenas data de inativação
@@ -2132,9 +2582,9 @@ app.put('/api/ssma/:id/atualizar-data-inativacao', (req, res) => {
 // ROTAS PARA FORNECEDORES
 
 // GET - Listar fornecedores
-app.get('/api/fornecedores', (req, res) => {
+// GET - Listar fornecedores
+app.get('/api/fornecedores', async (req, res) => {
     const situacao = req.query.situacao;
-    
     let sql = 'SELECT * FROM FORNECEDOR';
     let params = [];
     
@@ -2142,288 +2592,237 @@ app.get('/api/fornecedores', (req, res) => {
         sql += ' WHERE Situacao = ?';
         params.push(situacao);
     } else if (!situacao) {
-        // Por padrão, mostrar apenas fornecedores ativos
         sql += ' WHERE Situacao = "S"';
     }
-    // Se situacao === 'all', não adiciona WHERE (retorna todos)
     
     sql += ' ORDER BY Empresa';
     
-    db.all(sql, params, (err, rows) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
+    try {
+        console.log('🔍 GET /api/fornecedores - Situacao:', situacao);
+        const rows = await db.all(sql, params);
+        console.log('✅ Retornando', rows.length, 'fornecedores');
         res.json(rows || []);
-    });
+    } catch (err) {
+        console.error('❌ Erro na API de fornecedores:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DEBUG - Endpoint para verificar banco
+app.get('/debug-fornecedores', async (req, res) => {
+    try {
+        const rows = await db.all('SELECT * FROM FORNECEDOR');
+        res.send(`<h1>Debug Fornecedores</h1><pre>${JSON.stringify(rows, null, 2)}</pre>`);
+    } catch (err) {
+        res.status(500).send(err.message);
+    }
 });
 
 // POST - Criar fornecedor
-app.post('/api/fornecedores', (req, res) => {
-    const { empresa, cnpj, telefone, celular, contato, observacao } = req.body;
+app.post('/api/fornecedores', async (req, res) => {
+    let { empresa, cnpj, telefone, celular, contato, observacao } = req.body;
+    
+    empresa = normalizarTexto(empresa);
+    contato = normalizarTexto(contato);
+    observacao = normalizarTexto(observacao);
     
     if (!empresa) {
-        res.status(400).json({ error: 'Empresa é obrigatória' });
-        return;
+        return res.status(400).json({ error: 'Empresa é obrigatória' });
     }
     
-    // Verificar se CNPJ já existe
-    if (cnpj) {
-        db.get('SELECT id, Empresa FROM FORNECEDOR WHERE CNPJ = ?', [cnpj], (err, existing) => {
-            if (err) {
-                res.status(500).json({ error: err.message });
-                return;
-            }
-            
+    try {
+        if (cnpj) {
+            const existing = await db.get('SELECT id, Empresa FROM FORNECEDOR WHERE CNPJ = ?', [cnpj]);
             if (existing) {
-                res.status(400).json({ error: `CNPJ já cadastrado para: ${existing.Empresa}` });
-                return;
+                return res.status(400).json({ error: `CNPJ já cadastrado para: ${existing.Empresa}` });
             }
-            
-            // CNPJ não existe, pode inserir
-            inserirFornecedor();
-        });
-    } else {
-        inserirFornecedor();
-    }
-    
-    function inserirFornecedor() {
-        const sql = 'INSERT INTO FORNECEDOR (Empresa, CNPJ, Telefone, Celular, Contato, Observacao) VALUES (?, ?, ?, ?, ?, ?)';
+        }
         
-        db.run(sql, [empresa, cnpj, telefone, celular, contato, observacao], function(err) {
-            if (err) {
-                res.status(500).json({ error: err.message });
-                return;
-            }
-            
-            res.json({
-                id: this.lastID,
-                message: 'Fornecedor criado com sucesso'
-            });
+        const sql = 'INSERT INTO FORNECEDOR (Empresa, CNPJ, Telefone, Celular, Contato, Observacao) VALUES (?, ?, ?, ?, ?, ?)';
+        const result = await db.run(sql, [empresa, cnpj, telefone, celular, contato, observacao]);
+        
+        await registrarLog(req, 'Cadastrar Fornecedor', `Cadastrou o fornecedor [${empresa}]`);
+        
+        res.json({
+            id: result.lastID,
+            message: 'Fornecedor criado com sucesso'
         });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
 // PUT - Alternar situação do fornecedor (Ativo/Inativo)
-app.put('/api/fornecedores/:id/toggle-situacao', (req, res) => {
+app.put('/api/fornecedores/:id/toggle-situacao', async (req, res) => {
     const { id } = req.params;
     const { Situacao, DataInativacao } = req.body;
     
-    console.log('=== ALTERANDO SITUAÇÃO DO FORNECEDOR ===');
-    console.log('ID:', id);
-    console.log('Nova situação:', Situacao);
-    
-    // Validar situação
     if (!Situacao || !['S', 'N'].includes(Situacao)) {
-        res.status(400).json({ error: 'Situação inválida. Use S para Ativo ou N para Inativo' });
-        return;
+        return res.status(400).json({ error: 'Situação inválida. Use S para Ativo ou N para Inativo' });
     }
     
-    let sql, params;
-    
-    if (Situacao === 'N') {
-        // Inativando - registrar data de inativação
-        sql = 'UPDATE FORNECEDOR SET Situacao = ?, DataInativacao = ? WHERE id = ?';
-        params = [Situacao, DataInativacao || new Date().toISOString(), id];
-    } else {
-        // Ativando - limpar data de inativação
-        sql = 'UPDATE FORNECEDOR SET Situacao = ?, DataInativacao = NULL WHERE id = ?';
-        params = [Situacao, id];
-    }
-    
-    db.run(sql, params, function(err) {
-        if (err) {
-            console.error('Erro ao atualizar situação:', err);
-            res.status(500).json({ error: err.message });
-            return;
+    try {
+        let sql, params;
+        if (Situacao === 'N') {
+            sql = 'UPDATE FORNECEDOR SET Situacao = ?, DataInativacao = ? WHERE id = ?';
+            params = [Situacao, DataInativacao || new Date().toISOString(), id];
+        } else {
+            sql = 'UPDATE FORNECEDOR SET Situacao = ?, DataInativacao = NULL WHERE id = ?';
+            params = [Situacao, id];
         }
         
-        if (this.changes === 0) {
-            res.status(404).json({ error: 'Fornecedor não encontrado' });
-            return;
-        }
+        const row = await db.get('SELECT Empresa FROM FORNECEDOR WHERE id = ?', [id]);
+        const result = await db.run(sql, params);
+        if (result.changes === 0) return res.status(404).json({ error: 'Fornecedor não encontrado' });
         
         const statusText = Situacao === 'S' ? 'Ativo' : 'Inativo';
-        console.log(`Situação alterada para: ${statusText}`);
+        const acaoDesc = Situacao === 'S' ? 'Ativar Fornecedor' : 'Inativar Fornecedor';
+        await registrarLog(req, acaoDesc, `${Situacao === 'S' ? 'Ativou' : 'Inativou'} o fornecedor [${row ? row.Empresa : id}]`);
         
         res.json({
             message: `Situação alterada para ${statusText}`,
             Situacao: Situacao,
             DataInativacao: Situacao === 'N' ? (DataInativacao || new Date().toISOString()) : null
         });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // PUT - Atualizar fornecedor
-app.put('/api/fornecedores/:id', (req, res) => {
+app.put('/api/fornecedores/:id', async (req, res) => {
     const { id } = req.params;
-    const { empresa, cnpj, telefone, celular, contato, observacao, Situacao } = req.body;
+    let { empresa, cnpj, telefone, celular, contato, observacao, Situacao } = req.body;
     
-    // Se apenas Situacao foi enviada, usar o endpoint de toggle
+    empresa = normalizarTexto(empresa);
+    contato = normalizarTexto(contato);
+    observacao = normalizarTexto(observacao);
+    
     if (Situacao && !empresa) {
-        // Redirecionar para o endpoint de toggle
         return res.status(400).json({ error: 'Use o endpoint /api/fornecedores/:id/toggle-situacao para alterar apenas a situação' });
     }
     
     if (!empresa) {
-        res.status(400).json({ error: 'Empresa é obrigatória' });
-        return;
+        return res.status(400).json({ error: 'Empresa é obrigatória' });
     }
     
-    const sql = 'UPDATE FORNECEDOR SET Empresa = ?, CNPJ = ?, Telefone = ?, Celular = ?, Contato = ?, Observacao = ? WHERE id = ?';
-    
-    db.run(sql, [empresa, cnpj, telefone, celular, contato, observacao, id], function(err) {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        
-        if (this.changes === 0) {
-            res.status(404).json({ error: 'Fornecedor não encontrado' });
-            return;
-        }
-        
+    try {
+        const sql = 'UPDATE FORNECEDOR SET Empresa = ?, CNPJ = ?, Telefone = ?, Celular = ?, Contato = ?, Observacao = ? WHERE id = ?';
+        const result = await db.run(sql, [empresa, cnpj, telefone, celular, contato, observacao, id]);
+        if (result.changes === 0) return res.status(404).json({ error: 'Fornecedor não encontrado' });
+        await registrarLog(req, 'Atualizar Fornecedor', `Editou dados do fornecedor [${empresa}]`);
         res.json({ message: 'Fornecedor atualizado com sucesso' });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // GET - Buscar fornecedor específico
-app.get('/api/fornecedores/:id', (req, res) => {
+app.get('/api/fornecedores/:id', async (req, res) => {
     const { id } = req.params;
-    
-    db.get('SELECT * FROM FORNECEDOR WHERE id = ?', [id], (err, row) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        
-        if (!row) {
-            res.status(404).json({ error: 'Fornecedor não encontrado' });
-            return;
-        }
-        
+    try {
+        const row = await db.get('SELECT * FROM FORNECEDOR WHERE id = ?', [id]);
+        if (!row) return res.status(404).json({ error: 'Fornecedor não encontrado' });
         res.json(row);
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // DELETE - Excluir fornecedor
-app.delete('/api/fornecedores/:id', (req, res) => {
+app.delete('/api/fornecedores/:id', async (req, res) => {
     const { id } = req.params;
-    
-    db.run('DELETE FROM FORNECEDOR WHERE id = ?', [id], function(err) {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        
-        if (this.changes === 0) {
-            res.status(404).json({ error: 'Fornecedor não encontrado' });
-            return;
-        }
-        
+    try {
+        const row = await db.get('SELECT Empresa FROM FORNECEDOR WHERE id = ?', [id]);
+        const result = await db.run('DELETE FROM FORNECEDOR WHERE id = ?', [id]);
+        if (result.changes === 0) return res.status(404).json({ error: 'Fornecedor não encontrado' });
+        await registrarLog(req, 'Excluir Fornecedor', `Excluiu permanentemente o fornecedor [${row ? row.Empresa : id}]`);
         res.json({ message: 'Fornecedor excluído com sucesso' });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ===== ROTAS DE DOCUMENTAÇÃO =====
 
 // GET - Listar todas as documentações
-app.get('/api/documentacao', (req, res) => {
-    db.all('SELECT * FROM DOCUMENTACAO ORDER BY empresa', (err, rows) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
+app.get('/api/documentacao', async (req, res) => {
+    try {
+        const rows = await db.all('SELECT * FROM DOCUMENTACAO ORDER BY empresa');
         res.json(rows || []);
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // GET - Buscar documentação por CNPJ
-app.get('/api/documentacao/cnpj/:cnpj', (req, res) => {
+app.get('/api/documentacao/cnpj/:cnpj', async (req, res) => {
     const { cnpj } = req.params;
-    db.get('SELECT * FROM DOCUMENTACAO WHERE cnpj = ?', [decodeURIComponent(cnpj)], (err, row) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        if (!row) {
-            res.status(404).json({ error: 'Documentação não encontrada' });
-            return;
-        }
+    try {
+        const row = await db.get('SELECT * FROM DOCUMENTACAO WHERE cnpj = ?', [decodeURIComponent(cnpj)]);
+        if (!row) return res.status(404).json({ error: 'Documentação não encontrada' });
         res.json(row);
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // GET - Buscar documentação específica
-app.get('/api/documentacao/:id', (req, res) => {
+app.get('/api/documentacao/:id', async (req, res) => {
     const { id } = req.params;
-    db.get('SELECT * FROM DOCUMENTACAO WHERE id = ?', [id], (err, row) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        if (!row) {
-            res.status(404).json({ error: 'Documentação não encontrada' });
-            return;
-        }
+    try {
+        const row = await db.get('SELECT * FROM DOCUMENTACAO WHERE id = ?', [id]);
+        if (!row) return res.status(404).json({ error: 'Documentação não encontrada' });
         res.json(row);
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // POST - Criar nova documentação
-app.post('/api/documentacao', (req, res) => {
-    const { empresa, cnpj, pgr_emissao, pgr_vencimento, pgr_status, pcmso_emissao, pcmso_vencimento, pcmso_status, ativo } = req.body;
+app.post('/api/documentacao', async (req, res) => {
+    let { empresa, cnpj, pgr_emissao, pgr_vencimento, pgr_status, pcmso_emissao, pcmso_vencimento, pcmso_status, ativo } = req.body;
     
-    db.run(`
-        INSERT INTO DOCUMENTACAO (empresa, cnpj, pgr_emissao, pgr_vencimento, pgr_status, pcmso_emissao, pcmso_vencimento, pcmso_status, ativo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [empresa, cnpj, pgr_emissao, pgr_vencimento, pgr_status, pcmso_emissao, pcmso_vencimento, pcmso_status, ativo || 'S'], function(err) {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        res.json({ id: this.lastID, message: 'Documentação criada com sucesso' });
-    });
+    empresa = normalizarTexto(empresa);
+    const sql = `INSERT INTO DOCUMENTACAO (empresa, cnpj, pgr_emissao, pgr_vencimento, pgr_status, pcmso_emissao, pcmso_vencimento, pcmso_status, ativo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    try {
+        const result = await db.run(sql, [empresa, cnpj, pgr_emissao, pgr_vencimento, pgr_status, pcmso_emissao, pcmso_vencimento, pcmso_status, ativo || 'S']);
+        await registrarLog(req, 'Cadastrar Documentação', `Cadastrou documentação PGR/PCMSO para [${empresa}] (CNPJ: ${cnpj || '-'})`);
+        res.json({ id: result.lastID, message: 'Documentação criada com sucesso' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // PUT - Atualizar documentação
-app.put('/api/documentacao/:id', (req, res) => {
+app.put('/api/documentacao/:id', async (req, res) => {
     const { id } = req.params;
-    const { empresa, cnpj, pgr_emissao, pgr_vencimento, pgr_status, pcmso_emissao, pcmso_vencimento, pcmso_status, ativo } = req.body;
+    let { empresa, cnpj, pgr_emissao, pgr_vencimento, pgr_status, pcmso_emissao, pcmso_vencimento, pcmso_status, ativo } = req.body;
     
-    db.run(`
-        UPDATE DOCUMENTACAO 
-        SET empresa = ?, cnpj = ?, pgr_emissao = ?, pgr_vencimento = ?, pgr_status = ?, 
-            pcmso_emissao = ?, pcmso_vencimento = ?, pcmso_status = ?, ativo = ?, DataAlteracao = CURRENT_TIMESTAMP
-        WHERE id = ?
-    `, [empresa, cnpj, pgr_emissao, pgr_vencimento, pgr_status, pcmso_emissao, pcmso_vencimento, pcmso_status, ativo || 'S', id], function(err) {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        if (this.changes === 0) {
-            res.status(404).json({ error: 'Documentação não encontrada' });
-            return;
-        }
+    empresa = normalizarTexto(empresa);
+    const sql = `UPDATE DOCUMENTACAO SET empresa = ?, cnpj = ?, pgr_emissao = ?, pgr_vencimento = ?, pgr_status = ?, pcmso_emissao = ?, pcmso_vencimento = ?, pcmso_status = ?, ativo = ?, DataAlteracao = CURRENT_TIMESTAMP WHERE id = ?`;
+    try {
+        const result = await db.run(sql, [empresa, cnpj, pgr_emissao, pgr_vencimento, pgr_status, pcmso_emissao, pcmso_vencimento, pcmso_status, ativo || 'S', id]);
+        if (result.changes === 0) return res.status(404).json({ error: 'Documentação não encontrada' });
+        await registrarLog(req, 'Atualizar Documentação', `Editou documentação PGR/PCMSO de [${empresa}] (ID: ${id})`);
         res.json({ message: 'Documentação atualizada com sucesso' });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // DELETE - Excluir documentação
-app.delete('/api/documentacao/:id', (req, res) => {
+app.delete('/api/documentacao/:id', async (req, res) => {
     const { id } = req.params;
-    
-    db.run('DELETE FROM DOCUMENTACAO WHERE id = ?', [id], function(err) {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        if (this.changes === 0) {
-            res.status(404).json({ error: 'Documentação não encontrada' });
-            return;
-        }
+    try {
+        const row = await db.get('SELECT empresa FROM DOCUMENTACAO WHERE id = ?', [id]);
+        const result = await db.run('DELETE FROM DOCUMENTACAO WHERE id = ?', [id]);
+        if (result.changes === 0) return res.status(404).json({ error: 'Documentação não encontrada' });
+        await registrarLog(req, 'Excluir Documentação', `Excluiu documentação de [${row ? row.empresa : id}]`);
         res.json({ message: 'Documentação excluída com sucesso' });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Rota para servir a página principal
@@ -2443,32 +2842,29 @@ app.get('/api/habilitar-cursos', (req, res) => {
     });
 });
 
-app.post('/api/habilitar-cursos', (req, res) => {
+app.post('/api/habilitar-cursos', async (req, res) => {
     const { cursos } = req.body;
     
     if (!cursos || !Array.isArray(cursos)) {
-        res.status(400).json({ error: 'Dados inválidos' });
-        return;
+        return res.status(400).json({ error: 'Dados inválidos' });
     }
     
-    const stmt = db.prepare('UPDATE HABILITAR_CURSOS SET habilitado = ? WHERE curso = ?');
-    
-    cursos.forEach(curso => {
-        stmt.run([curso.habilitado, curso.curso], (err) => {
-            if (err) {
-                console.error('Erro ao atualizar curso:', err);
+    try {
+        for (const curso of cursos) {
+            const updateResult = await db.run('UPDATE HABILITAR_CURSOS SET habilitado = ? WHERE curso = ?', [curso.habilitado, curso.curso]);
+            if (updateResult && updateResult.changes === 0) {
+                await db.run('INSERT INTO HABILITAR_CURSOS (curso, habilitado) VALUES (?, ?)', [curso.curso, curso.habilitado]);
             }
-        });
-    });
-    
-    stmt.finalize((err) => {
-        if (err) {
-            console.error('Erro ao finalizar atualização:', err);
-            res.status(500).json({ error: err.message });
-            return;
         }
+
+        // Auditoria inteligente
+        await registrarLog(req, 'Configurar Cursos', `Alterou a visibilidade dos cursos/treinamentos monitorados no painel`);
+        
         res.json({ message: 'Cursos atualizados com sucesso' });
-    });
+    } catch (err) {
+        console.error('Erro ao atualizar cursos:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Rotas para Configuração do Relatório
@@ -2482,31 +2878,34 @@ app.get('/api/configuracao-relatorio', (req, res) => {
     });
 });
 
-app.post('/api/configuracao-relatorio', (req, res) => {
-    const { titulo, rodape, logo } = req.body;
+app.post('/api/configuracao-relatorio', async (req, res) => {
+    const { titulo, rodape, logo, tecnico_seguranca, epi_itens_padrao } = req.body;
     
-    db.run(`UPDATE configuracao_relatorio SET titulo = ?, rodape = ?, logo = ? WHERE id = 1`, 
-        [titulo || 'Relatório de Cursos', rodape || 'SSMA', logo || '/Logo-Hoss.jpg'], 
-        function(err) {
-            if (err) {
-                res.status(500).json({ error: err.message });
-                return;
-            }
-            if (this.changes === 0) {
-                // Se não atualizou, inserir
-                db.run(`INSERT INTO configuracao_relatorio (titulo, rodape, logo) VALUES (?, ?, ?)`,
-                    [titulo || 'Relatório de Cursos', rodape || 'SSMA', logo || '/Logo-Hoss.jpg'],
-                    (err) => {
-                        if (err) {
-                            res.status(500).json({ error: err.message });
-                            return;
-                        }
-                        res.json({ message: 'Configuração salva com sucesso' });
-                    });
-            } else {
-                res.json({ message: 'Configuração salva com sucesso' });
-            }
-        });
+    try {
+        const result = await db.run(
+            `UPDATE configuracao_relatorio SET titulo = ?, rodape = ?, logo = ?, tecnico_seguranca = ?, epi_itens_padrao = ? WHERE id = 1`, 
+            [titulo || 'Relatório de Cursos', rodape || 'SSMA', logo || '/Logo-Hoss.jpg',
+             tecnico_seguranca !== undefined ? tecnico_seguranca : '',
+             epi_itens_padrao !== undefined ? epi_itens_padrao : '[]']
+        );
+        
+        if (result.changes === 0) {
+            // Se não atualizou, inserir
+            await db.run(
+                `INSERT INTO configuracao_relatorio (titulo, rodape, logo, tecnico_seguranca, epi_itens_padrao) VALUES (?, ?, ?, ?, ?)`,
+                [titulo || 'Relatório de Cursos', rodape || 'SSMA', logo || '/Logo-Hoss.jpg',
+                 tecnico_seguranca || '', epi_itens_padrao || '[]']
+            );
+        }
+        
+        // Auditoria inteligente
+        await registrarLog(req, 'Configurar Relatório', `Atualizou as diretrizes de impressão/relatórios do sistema`);
+        
+        res.json({ message: 'Configuração salva com sucesso' });
+    } catch (err) {
+        console.error('❌ Erro ao salvar configuração:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Rota para exportar SSMA para Excel (.xlsx) com colunas selecionadas
@@ -2748,6 +3147,8 @@ app.post('/api/exportar-excel-custom', async (req, res) => {
                 // Gerar buffer e enviar
                 const buffer = await workbook.xlsx.writeBuffer();
                 
+                await registrarLog(req, 'Exportar Excel', `Exportou relatório Excel personalizado (${rows.length} registros)`);
+                
                 res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet; charset=UTF-8');
                 res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''relatorio_ssma_${new Date().toISOString().split('T')[0]}.xlsx`);
                 res.send(buffer);
@@ -2891,6 +3292,8 @@ app.get('/api/exportar-excel', async (req, res) => {
                 
                 // Gerar buffer e enviar
                 const buffer = await workbook.xlsx.writeBuffer();
+                
+                await registrarLog(req, 'Exportar Excel', `Exportou relatório Excel padrão (${rows.length} registros)`);
                 
                 res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet; charset=UTF-8');
                 res.setHeader('Content-Disposition', `attachment; filename="relatorio_ssma.xlsx"`);
@@ -3164,21 +3567,27 @@ app.get('/api/presenca/funcionarios', (req, res) => {
 
 // POST - Salvar presença de um funcionário
 app.post('/api/presenca/salvar', (req, res) => {
-    const { funcionario_id, data, status, observacao } = req.body;
+    let { funcionario_id, data, status, observacao } = req.body;
+    
+    observacao = normalizarTexto(observacao);
     
     if (!funcionario_id || !data) {
         return res.status(400).json({ error: 'funcionario_id e data são obrigatórios' });
     }
     
     const sql = `
-        INSERT INTO PRESENCA (funcionario_id, data, status, observacao)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO PRESENCA (funcionario_id, data, status, observacao, funcionarioFuncao, funcionarioEmpresa)
+        VALUES (?, ?, ?, ?, 
+            (SELECT Funcao FROM SSMA WHERE id = ?), 
+            (SELECT Empresa FROM SSMA WHERE id = ?))
         ON CONFLICT(funcionario_id, data) DO UPDATE SET
             status = excluded.status,
-            observacao = excluded.observacao
+            observacao = excluded.observacao,
+            funcionarioFuncao = excluded.funcionarioFuncao,
+            funcionarioEmpresa = excluded.funcionarioEmpresa
     `;
     
-    db.run(sql, [funcionario_id, data, status || 'P', observacao || ''], function(err) {
+    db.run(sql, [funcionario_id, data, status || 'P', observacao || '', funcionario_id, funcionario_id], function(err) {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
@@ -3188,7 +3597,14 @@ app.post('/api/presenca/salvar', (req, res) => {
 
 // POST - Salvar múltiplas presenças de uma vez
 app.post('/api/presenca/salvar-lote', (req, res) => {
-    const { presencas } = req.body; // Array de { funcionario_id, data, status, observacao }
+    let { presencas } = req.body; // Array de { funcionario_id, data, status, observacao }
+    
+    if (presencas && Array.isArray(presencas)) {
+        presencas = presencas.map(p => ({
+            ...p,
+            observacao: normalizarTexto(p.observacao)
+        }));
+    }
     
     if (!presencas || !Array.isArray(presencas)) {
         return res.status(400).json({ error: 'presencas deve ser um array' });
@@ -3281,6 +3697,40 @@ app.get('/api/presenca/resumo', (req, res) => {
     });
 });
 
+// BUSCAR PRESENÇA (SQL)
+app.get('/api/controle-presenca', async (req, res) => {
+    try {
+        const mesAno = getMesAnoAtual();
+        const rows = await db.all("SELECT * FROM PRESENCA_MES_ATUAL WHERE mesAno = ?", [mesAno]);
+        const comments = await db.all("SELECT * FROM COMENTARIOS_PRESENCA WHERE mesAno = ?", [mesAno]);
+        const ocultos = await db.all("SELECT funcionarioId FROM FUNCIONARIOS_OCULTOS WHERE mesAno = ?", [mesAno]);
+        
+        // Formatar para o frontend (compatibilidade)
+        const presenca = {};
+        rows.forEach(r => {
+            if (!presenca[r.funcionarioId]) presenca[r.funcionarioId] = {};
+            presenca[r.funcionarioId][r.dia] = { status: r.status, isFolga: r.isFolga === 1 };
+        });
+        
+        const comentarios = {};
+        comments.forEach(c => {
+            comentarios[`${c.funcionarioId}_${c.dia}`] = { texto: c.texto, data: c.dataCriacao };
+        });
+
+        const listOcultos = ocultos.map(o => o.funcionarioId);
+
+        res.json({
+            success: true,
+            mesAtual: mesAno,
+            presenca: presenca,
+            comentarios: comentarios,
+            ocultos: listOcultos
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // ============ ROTAS DE CONTROLE DE PRESENÇA ============
 
 // GET - Buscar funcionários para controle de presença
@@ -3307,12 +3757,20 @@ app.get('/api/controle-presenca/funcionarios', (req, res) => {
             
             const idsComPresenca = (presencaRows || []).map(row => row.funcionarioId);
             
-            // Buscar funcionários inativados que têm presença no mês
+            // Buscar funcionários inativados que têm presença REAL no mês (P, F, A, FE, FO - não apenas registros vazios)
             if (idsComPresenca.length > 0) {
                 const placeholders = idsComPresenca.map(() => '?').join(',');
-                const sqlInativos = `SELECT id, Nome, Empresa, Funcao, Situacao FROM SSMA WHERE id IN (${placeholders}) AND Situacao = 'S'`;
+                const sqlInativos = `
+                    SELECT DISTINCT s.id, s.Nome, s.Empresa, s.Funcao, s.Situacao 
+                    FROM SSMA s
+                    INNER JOIN PRESENCA p ON p.funcionarioId = s.id
+                    WHERE s.id IN (${placeholders}) 
+                    AND s.Situacao = 'S'
+                    AND p.mesAno = ?
+                    AND p.status IN ('P', 'F', 'A', 'FE', 'FO')
+                `;
                 
-                db.all(sqlInativos, idsComPresenca, (err3, inativos) => {
+                db.all(sqlInativos, [...idsComPresenca, presencaMesAtual], (err3, inativos) => {
                     if (err3) {
                         console.error('Erro ao buscar inativos:', err3);
                     }
@@ -3466,10 +3924,9 @@ app.get('/api/controle-presenca/funcionarios', (req, res) => {
 });
 
 // GET - Buscar dados de presença do mês atual
-app.get('/api/controle-presenca/dados', (req, res) => {
-    verificarResetMes();
+app.get('/api/controle-presenca/dados', async (req, res) => {
+    await verificarResetMes();
     
-    // Buscar dados do banco de dados em vez de memória
     const sql = `
         SELECT funcionarioId, dia, status, comentario
         FROM PRESENCA
@@ -3477,13 +3934,8 @@ app.get('/api/controle-presenca/dados', (req, res) => {
         ORDER BY funcionarioId, dia
     `;
     
-    db.all(sql, [presencaMesAtual], (err, rows) => {
-        if (err) {
-            console.error('❌ Erro ao buscar dados de presença:', err);
-            return res.status(500).json({ error: err.message });
-        }
-        
-        // Converter para formato esperado pelo frontend
+    try {
+        const rows = await db.all(sql, [presencaMesAtual]);
         const dados = {};
         const comentarios = {};
         
@@ -3492,12 +3944,9 @@ app.get('/api/controle-presenca/dados', (req, res) => {
                 dados[row.funcionarioId] = {};
             }
             
-            // ⭐ Se status é ponto ou hífen, marcar como folga
-            const isFolga = (row.status === '.' || row.status === '-');
-            
             dados[row.funcionarioId][row.dia] = {
                 status: row.status || '',
-                isFolga: isFolga
+                isFolga: false
             };
             
             if (row.comentario) {
@@ -3508,9 +3957,11 @@ app.get('/api/controle-presenca/dados', (req, res) => {
             }
         });
         
-        console.log(`✅ Dados de presença carregados do banco: ${presencaMesAtual}`);
         res.json({ data: dados, comentarios: comentarios, mesAno: presencaMesAtual });
-    });
+    } catch (err) {
+        console.error('❌ Erro ao buscar dados de presença:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // GET - Buscar histórico de presença (todos os meses)
@@ -3618,10 +4069,11 @@ app.post('/api/controle-presenca/limpar', (req, res) => {
 });
 
 // POST - Salvar marcação de presença
-app.post('/api/controle-presenca/marcar', (req, res) => {
+app.post('/api/controle-presenca/marcar', async (req, res) => {
     verificarResetMes();
     
-    const { funcionarioId, funcionarioNome, funcionarioEmpresa, funcionarioFuncao, funcionarioSituacao, dia, status, isFolga } = req.body;
+    const { funcionarioId, funcionarioNome, funcionarioEmpresa, funcionarioSituacao, dia, status } = req.body;
+    const funcionarioFuncao = req.body.funcionarioFuncao ? req.body.funcionarioFuncao.normalize('NFC').trim() : '';
     
     if (!funcionarioId || !dia) {
         return res.status(400).json({ error: 'funcionarioId e dia são obrigatórios' });
@@ -3629,174 +4081,192 @@ app.post('/api/controle-presenca/marcar', (req, res) => {
     
     const mesAno = presencaMesAtual;
     
-    // Salvar no banco de dados
-    if (status === '' || status === null) {
-        // Se é folga, deletar o registro
-        db.run(
-            'DELETE FROM PRESENCA WHERE mesAno = ? AND funcionarioId = ? AND dia = ?',
-            [mesAno, funcionarioId, dia],
-            function(err) {
-                if (err) {
-                    console.error('❌ Erro ao deletar presença:', err);
-                    return res.status(500).json({ error: err.message });
-                }
-                
-                console.log(`✅ Presença deletada: ${funcionarioNome} - Dia ${dia}`);
-                res.json({ success: true, mesAno: mesAno });
-            }
-        );
-    } else {
-        // Inserir ou atualizar presença
-        db.run(
-            `INSERT INTO PRESENCA 
-            (mesAno, funcionarioId, funcionarioNome, funcionarioEmpresa, funcionarioFuncao, funcionarioSituacao, dia, status, formatacao)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(mesAno, funcionarioId, dia) DO UPDATE SET
-                status = excluded.status,
-                dataAtualizacao = CURRENT_TIMESTAMP`,
-            [mesAno, funcionarioId, funcionarioNome, funcionarioEmpresa, funcionarioFuncao, funcionarioSituacao, dia, status, 'normal'],
-            function(err) {
-                if (err) {
-                    console.error('❌ Erro ao salvar presença:', err);
-                    return res.status(500).json({ error: err.message });
-                }
-                
-                console.log(`✅ Presença salva: ${funcionarioNome} - Dia ${dia} - Status: ${status}`);
-                res.json({ success: true, mesAno: mesAno });
-            }
-        );
-    }
-});
-
-// POST - Salvar comentário de presença
-app.post('/api/controle-presenca/comentario', (req, res) => {
-    verificarResetMes();
-    
-    const { funcionarioId, dia, comentario } = req.body;
-    
-    if (!funcionarioId || !dia) {
-        return res.status(400).json({ error: 'funcionarioId e dia são obrigatórios' });
-    }
-    
-    const mesAno = presencaMesAtual;
-    
-    // Buscar nome do funcionário
-    db.get('SELECT Nome, Empresa, Funcao FROM SSMA WHERE id = ?', [funcionarioId], (err, funcionario) => {
-        if (err || !funcionario) {
-            console.error('❌ Erro ao buscar funcionário:', err);
-            return res.status(500).json({ error: 'Funcionário não encontrado' });
+    try {
+        if (status === '' || status === null) {
+            // Se é folga, deletar o registro
+            await db.run(
+                'DELETE FROM PRESENCA WHERE mesAno = ? AND funcionarioId = ? AND dia = ?',
+                [mesAno, funcionarioId, dia]
+            );
+            
+            console.log(`✅ Presença deletada: ${funcionarioNome} - Dia ${dia}`);
+            
+            // Auditoria inteligente automática
+            await registrarLog(req, 'Limpar Presença', `Limpou a marcação de presença de [${funcionarioNome}] no dia ${dia}`);
+        } else {
+            // Inserir ou atualizar presença
+            await db.run(
+                `INSERT INTO PRESENCA 
+                (mesAno, funcionarioId, funcionarioNome, funcionarioEmpresa, funcionarioFuncao, funcionarioSituacao, dia, status, formatacao)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(mesAno, funcionarioId, dia) DO UPDATE SET
+                    status = excluded.status,
+                    dataAtualizacao = CURRENT_TIMESTAMP`,
+                [mesAno, funcionarioId, funcionarioNome, funcionarioEmpresa, funcionarioFuncao, funcionarioSituacao, dia, status, req.body.formatacao || 'normal']
+            );
+            
+            console.log(`✅ Presença salva: ${funcionarioNome} - Dia ${dia} - Status: ${status}`);
+            
+            // Auditoria inteligente automática
+            await registrarLog(req, 'Marcar Presença', `Marcou presença [${status}] para o funcionário [${funcionarioNome}] no dia ${dia}`);
         }
         
-        // Salvar no banco de dados
-        if (comentario && comentario.trim()) {
-            db.run(
-                `INSERT INTO PRESENCA (mesAno, funcionarioId, funcionarioNome, funcionarioEmpresa, funcionarioFuncao, dia, comentario, dataAtualizacao)
-                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(mesAno, funcionarioId, dia) DO UPDATE SET
-                    comentario = excluded.comentario,
-                    dataAtualizacao = CURRENT_TIMESTAMP`,
-                [mesAno, funcionarioId, funcionario.Nome, funcionario.Empresa, funcionario.Funcao, dia, comentario.trim()],
-                function(err) {
-                    if (err) {
-                        console.error('❌ Erro ao salvar comentário:', err);
-                        return res.status(500).json({ error: err.message });
-                    }
-                    
-                    console.log(`✅ Comentário salvo: ${funcionario.Nome} - Dia ${dia}`);
-                    res.json({ success: true });
-                }
+        res.json({ success: true, mesAno: mesAno });
+    } catch (err) {
+        console.error('❌ Erro ao processar presença:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// COMENTÁRIO PRESENÇA (SQL)
+app.post('/api/controle-presenca/comentario', async (req, res) => {
+    try {
+        const { funcionarioId, dia, texto } = req.body;
+        const mesAno = getMesAnoAtual();
+        
+        const existing = await db.get("SELECT id FROM COMENTARIOS_PRESENCA WHERE mesAno = ? AND funcionarioId = ? AND dia = ?", [mesAno, funcionarioId, dia]);
+        
+        if (existing) {
+            if (!texto) {
+                await db.run("DELETE FROM COMENTARIOS_PRESENCA WHERE id = ?", [existing.id]);
+            } else {
+                await db.run("UPDATE COMENTARIOS_PRESENCA SET texto = ? WHERE id = ?", [texto, existing.id]);
+            }
+        } else if (texto) {
+            await db.run(
+                "INSERT INTO COMENTARIOS_PRESENCA (mesAno, funcionarioId, dia, texto, dataCriacao) VALUES (?, ?, ?, ?, datetime('now'))",
+                [mesAno, funcionarioId, dia, texto]
             );
+        }
+
+        // Capturar o nome do funcionário
+        const func = await db.get("SELECT Nome FROM SSMA WHERE id = ?", [funcionarioId]);
+        
+        // Auditoria inteligente (Passando 'req' para carregar corretamente 'Danilo', IP e Navegador!)
+        await registrarLog(req, 'Comentário Presença', `Alterou comentário de [${func?.Nome || funcionarioId}] no dia ${dia}`);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('❌ Erro ao salvar comentário:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// OCULTAR FUNCIONÁRIO (SQL)
+app.post('/api/controle-presenca/ocultar', async (req, res) => {
+    try {
+        const { funcionarioId } = req.body;
+        const mesAno = getMesAnoAtual();
+        
+        await db.run(
+            "INSERT OR IGNORE INTO FUNCIONARIOS_OCULTOS (mesAno, funcionarioId) VALUES (?, ?)",
+            [mesAno, funcionarioId]
+        );
+
+        const func = await db.get("SELECT Nome FROM SSMA WHERE id = ?", [funcionarioId]);
+        await registrarLog(req, 'Ocultar Funcionário', `Ocultou o funcionário [${func?.Nome || funcionarioId}] da planilha de presença`);
+        
+        res.json({ success: true });
+    } catch (err) {
+        console.error('❌ Erro ao ocultar funcionário:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// MOSTRAR FUNCIONÁRIO (SQL)
+app.post('/api/controle-presenca/mostrar', async (req, res) => {
+    try {
+        const { funcionarioId } = req.body;
+        const mesAno = getMesAnoAtual();
+        
+        await db.run(
+            "DELETE FROM FUNCIONARIOS_OCULTOS WHERE mesAno = ? AND funcionarioId = ?",
+            [mesAno, funcionarioId]
+        );
+
+        const func = await db.get("SELECT Nome FROM SSMA WHERE id = ?", [funcionarioId]);
+        await registrarLog(req, 'Exibir Funcionário', `Voltou a exibir o funcionário [${func?.Nome || funcionarioId}] na planilha de presença`);
+        
+        res.json({ success: true });
+    } catch (err) {
+        console.error('❌ Erro ao mostrar funcionário:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// LISTAR OCULTOS (SQL)
+app.get('/api/controle-presenca/ocultos', async (req, res) => {
+    try {
+        const mesAno = getMesAnoAtual();
+        const rows = await db.all("SELECT funcionarioId FROM FUNCIONARIOS_OCULTOS WHERE mesAno = ?", [mesAno]);
+        res.json({ success: true, ocultos: rows.map(r => r.funcionarioId) });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// FECHAR MÊS MANUALMENTE
+app.post('/api/controle-presenca/fechar-mes', async (req, res) => {
+    try {
+        const { usuario } = req.body;
+        const mesAno = getMesAnoAtual();
+        
+        console.log(`🚀 Fechamento manual do mês ${mesAno} solicitado por ${usuario}`);
+        
+        // 1. Gerar Backup Excel
+        await gerarBackupPresenca(mesAno);
+        
+        // 2. Salvar no Histórico SQL
+        await salvarHistoricoPresenca(mesAno);
+        
+        // 3. Limpar tabelas atuais para o novo mês
+        await db.run("DELETE FROM PRESENCA_MES_ATUAL WHERE mesAno = ?", [mesAno]);
+        await db.run("DELETE FROM COMENTARIOS_PRESENCA WHERE mesAno = ?", [mesAno]);
+        await db.run("DELETE FROM FUNCIONARIOS_OCULTOS WHERE mesAno = ?", [mesAno]);
+        
+        await registrarLog(usuario, 'Fechar Mês', `Encerrou manualmente o mês ${mesAno}`);
+        
+        res.json({ success: true, message: 'Mês encerrado e arquivado com sucesso!' });
+    } catch (err) {
+        console.error('Erro ao fechar mês:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// LISTAR BACKUPS
+app.get('/api/backups/listar', async (req, res) => {
+    try {
+        const downloadsPath = path.join(require('os').homedir(), 'Downloads');
+        const files = fs.readdirSync(downloadsPath)
+            .filter(f => f.startsWith('Backup_Presenca_') || f.startsWith('Presenca_'))
+            .map(f => ({
+                nome: f,
+                data: fs.statSync(path.join(downloadsPath, f)).mtime,
+                tamanho: fs.statSync(path.join(downloadsPath, f)).size
+            }))
+            .sort((a, b) => b.data - a.data);
+            
+        res.json({ success: true, backups: files });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// DOWNLOAD BACKUP
+app.get('/api/backups/download/:arquivo', (req, res) => {
+    try {
+        const { arquivo } = req.params;
+        const downloadsPath = path.join(require('os').homedir(), 'Downloads');
+        const filePath = path.join(downloadsPath, arquivo);
+        
+        if (fs.existsSync(filePath)) {
+            res.download(filePath);
         } else {
-            // Deletar comentário se vazio
-            db.run(
-                'UPDATE PRESENCA SET comentario = NULL WHERE mesAno = ? AND funcionarioId = ? AND dia = ?',
-                [mesAno, funcionarioId, dia],
-                function(err) {
-                    if (err) {
-                        console.error('❌ Erro ao deletar comentário:', err);
-                        return res.status(500).json({ error: err.message });
-                    }
-                    
-                    res.json({ success: true });
-                }
-            );
+            res.status(404).json({ success: false, error: 'Arquivo não encontrado' });
         }
-    });
-});
-
-// POST - Ocultar funcionário da lista de presença
-app.post('/api/controle-presenca/ocultar', (req, res) => {
-    verificarResetMes();
-    
-    const { funcionarioId } = req.body;
-    
-    if (!funcionarioId) {
-        return res.status(400).json({ error: 'funcionarioId é obrigatório' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
     }
-    
-    // Salvar no banco de dados
-    db.run(
-        'INSERT OR IGNORE INTO FUNCIONARIOS_OCULTOS (funcionarioId) VALUES (?)',
-        [funcionarioId],
-        function(err) {
-            if (err) {
-                console.error('❌ Erro ao ocultar funcionário:', err);
-                return res.status(500).json({ error: err.message });
-            }
-            
-            console.log(`👁️ Funcionário ${funcionarioId} ocultado da lista de presença`);
-            res.json({ success: true, message: 'Funcionário ocultado com sucesso' });
-        }
-    );
-});
-
-// POST - Mostrar funcionário na lista de presença
-app.post('/api/controle-presenca/mostrar', (req, res) => {
-    verificarResetMes();
-    
-    const { funcionarioId } = req.body;
-    
-    if (!funcionarioId) {
-        return res.status(400).json({ error: 'funcionarioId é obrigatório' });
-    }
-    
-    // Deletar do banco de dados
-    db.run(
-        'DELETE FROM FUNCIONARIOS_OCULTOS WHERE funcionarioId = ?',
-        [funcionarioId],
-        function(err) {
-            if (err) {
-                console.error('❌ Erro ao mostrar funcionário:', err);
-                return res.status(500).json({ error: err.message });
-            }
-            
-            console.log(`👁️ Funcionário ${funcionarioId} voltou a aparecer na lista de presença`);
-            res.json({ success: true, message: 'Funcionário visível novamente' });
-        }
-    );
-});
-
-// GET - Listar funcionários ocultos
-app.get('/api/controle-presenca/ocultos', (req, res) => {
-    verificarResetMes();
-    
-    const ocultosMesAtual = funcionariosOcultos[presencaMesAtual] || {};
-    const idsOcultos = Object.keys(ocultosMesAtual).filter(id => ocultosMesAtual[id]);
-    
-    if (idsOcultos.length === 0) {
-        return res.json({ data: [], count: 0 });
-    }
-    
-    // Buscar dados dos funcionários ocultos
-    const placeholders = idsOcultos.map(() => '?').join(',');
-    const sql = `SELECT id, Nome, Empresa, Funcao, Situacao FROM SSMA WHERE id IN (${placeholders})`;
-    
-    db.all(sql, idsOcultos, (err, rows) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
-        res.json({ data: rows, count: rows.length });
-    });
 });
 
 // ============ ROTAS DE EMPRESAS OCULTAS ============
@@ -4062,8 +4532,8 @@ app.post('/api/controle-presenca/exportar', async (req, res) => {
             for (let dia = 1; dia <= diasNoMes; dia++) {
                 const valorExibir = presencaFunc[dia] || '';
                 
-                // ⭐ Se o valor for ponto ou hífen, não exibir no Excel (deixar vazio)
-                const valorParaExibir = (valorExibir === '.' || valorExibir === '-') ? '' : valorExibir;
+                // Se o valor for "AZUL", não exibir texto, apenas aplicar cor de fundo
+                const valorParaExibir = (valorExibir === 'AZUL') ? '' : valorExibir;
                 
                 row.getCell(3 + dia).value = valorParaExibir;
                 row.getCell(3 + dia).alignment = { horizontal: 'center' };
@@ -4116,8 +4586,8 @@ app.post('/api/controle-presenca/exportar', async (req, res) => {
                 } else if (valorLimpo === 'N') {
                     // Novo - dourado
                     row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFD700' } };
-                } else if (valorLimpo === '.' || valorLimpo === '-' || (valorLimpo === '' && isFimDeSemana)) {
-                    // Ponto, hífen OU fim de semana vazio - azul médio
+                } else if (valorLimpo === 'AZUL' || valorLimpo === '-' || valorLimpo === '.' || (valorLimpo === '' && isFimDeSemana)) {
+                    // AZUL (folga digitada), hífen, ponto OU fim de semana vazio - azul médio
                     row.getCell(3 + dia).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB3E5FC' } };
                 }
             }
@@ -4139,16 +4609,17 @@ app.post('/api/controle-presenca/exportar', async (req, res) => {
         const resumoPorFuncao = {};
         for (const func of funcionarios) {
             const presencaFunc = dadosPresenca[func.id] || {};
-            if (!resumoPorFuncao[func.Funcao]) {
-                resumoPorFuncao[func.Funcao] = {};
+            const funcaoKey = func.Funcao ? func.Funcao.normalize('NFC').trim() : '';
+            if (!resumoPorFuncao[funcaoKey]) {
+                resumoPorFuncao[funcaoKey] = {};
                 for (let dia = 1; dia <= diasNoMes; dia++) {
-                    resumoPorFuncao[func.Funcao][dia] = { P: 0, F: 0 };
+                    resumoPorFuncao[funcaoKey][dia] = { P: 0, F: 0 };
                 }
             }
             for (let dia = 1; dia <= diasNoMes; dia++) {
                 const status = presencaFunc[dia] || '';
-                if (status === 'P') resumoPorFuncao[func.Funcao][dia].P++;
-                if (status === 'F') resumoPorFuncao[func.Funcao][dia].F++;
+                if (status === 'P') resumoPorFuncao[funcaoKey][dia].P++;
+                if (status === 'F') resumoPorFuncao[funcaoKey][dia].F++;
             }
         }
         
@@ -4292,8 +4763,7 @@ app.post('/api/controle-presenca/exportar', async (req, res) => {
         rowTotalEmpresa.getCell(3 + diasNoMes).value = totalGeralFEmpresa;
         rowTotalEmpresa.getCell(3 + diasNoMes).font = { bold: true, color: { argb: 'FFFFFFFF' } };
         rowTotalEmpresa.getCell(3 + diasNoMes).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } };
-        
-        // Ajustar larguras
+// Ajustar larguras
         sheet.getColumn(1).width = 20;
         sheet.getColumn(2).width = 30;
         sheet.getColumn(3).width = 20;
@@ -4319,151 +4789,147 @@ app.post('/api/controle-presenca/exportar', async (req, res) => {
 
 // ==================== ROTAS DE BACKUP E MANUTENÇÃO ====================
 
-// ==================== ROTAS DE BACKUP E MANUTENÇÃO ====================
-
 // Exportar backup completo
-app.get('/api/backup/exportar', (req, res) => {
-    const backup = {
-        versao: '2.0',
-        dataBackup: new Date().toISOString(),
-        dados: {}
-    };
-    
-    // Buscar funcionários
-    db.all('SELECT * FROM SSMA', (err, funcionarios) => {
-        if (err) {
-            console.error('Erro ao buscar funcionários:', err);
-            return res.status(500).json({ error: 'Erro ao buscar funcionários: ' + err.message });
-        }
+app.get('/api/backup/exportar', async (req, res) => {
+    try {
+        console.log('📤 Iniciando geração de backup completo...');
         
-        // CONVERTER FOTOS (BLOB) PARA BASE64 PARA SALVAR NO JSON
+        const backup = {
+            versao: '2.1',
+            dataBackup: new Date().toISOString(),
+            dados: {}
+        };
+        
+        // Buscar todos os dados em paralelo para maior performance
+        const [
+            funcionarios,
+            fornecedores,
+            documentacao,
+            configuracao,
+            cursosHabilitados,
+            configuracoesNR,
+            presencaBanco,
+            historicoPresenca,
+            mudancasFuncao,
+            empresasOcultas,
+            auditLog
+        ] = await Promise.all([
+            db.all('SELECT * FROM SSMA'),
+            db.all('SELECT * FROM FORNECEDOR'),
+            db.all('SELECT * FROM DOCUMENTACAO'),
+            db.get('SELECT * FROM configuracao_relatorio WHERE id = 1'),
+            db.all('SELECT * FROM HABILITAR_CURSOS'),
+            db.all('SELECT * FROM configuracao_nrs'),
+            db.all('SELECT * FROM PRESENCA'),
+            db.all('SELECT * FROM HISTORICO_PRESENCA'),
+            db.all('SELECT * FROM MUDANCA_FUNCAO_PRESENCA'),
+            db.all('SELECT * FROM EMPRESAS_OCULTAS'),
+            db.all('SELECT * FROM AUDIT_LOG')
+        ]);
+
+        // CONVERTER FOTOS (BLOB) PARA BASE64
         backup.dados.funcionarios = (funcionarios || []).map(f => {
             const func = { ...f };
             if (func.Foto) {
-                // Se é Buffer, converter para base64
                 if (Buffer.isBuffer(func.Foto)) {
                     func.Foto = func.Foto.toString('base64');
-                }
-                // Se é objeto {type: 'Buffer', data: [...]}, converter
-                else if (func.Foto.type === 'Buffer' && Array.isArray(func.Foto.data)) {
+                } else if (func.Foto.type === 'Buffer' && Array.isArray(func.Foto.data)) {
                     func.Foto = Buffer.from(func.Foto.data).toString('base64');
                 }
             }
             return func;
         });
         
-        // Buscar fornecedores (tabela FORNECEDOR)
-        db.all('SELECT * FROM FORNECEDOR', (err, fornecedores) => {
-            if (err) {
-                console.error('Erro ao buscar fornecedores:', err);
-            }
-            backup.dados.fornecedores = fornecedores || [];
-            
-            // Buscar documentação (tabela DOCUMENTACAO)
-            db.all('SELECT * FROM DOCUMENTACAO', (err, documentacao) => {
-                if (err) {
-                    console.error('Erro ao buscar documentação:', err);
-                }
-                backup.dados.documentacao = documentacao || [];
-                
-                // Buscar configuração
-                db.get('SELECT * FROM configuracao_relatorio WHERE id = 1', (err, config) => {
-                    if (err) {
-                        console.error('Erro ao buscar configuração:', err);
-                    }
-                    backup.dados.configuracao = config || {};
-                    
-                    // Buscar cursos habilitados
-                    db.all('SELECT * FROM habilitar_cursos', (err, cursos) => {
-                        if (err) {
-                            console.error('Erro ao buscar cursos habilitados:', err);
-                        }
-                        backup.dados.cursosHabilitados = cursos || [];
-                        
-                        // INCLUIR DADOS DE PRESENÇA NO BACKUP (MEMÓRIA + BANCO)
-                        backup.dados.presenca = {
-                            presencaMemoria: presencaMemoria,
-                            comentariosPresenca: comentariosPresenca,
-                            ocorrenciasPresenca: ocorrenciasPresenca,
-                            funcionariosOcultos: funcionariosOcultos,
-                            presencaMesAtual: presencaMesAtual
-                        };
-                        
-                        // BUSCAR DADOS DA TABELA PRESENCA DO BANCO
-                        db.all('SELECT * FROM PRESENCA', (err, presencaBanco) => {
-                            if (err) {
-                                console.error('Erro ao buscar presença do banco:', err);
-                            }
-                            backup.dados.presencaBanco = presencaBanco || [];
-                            
-                            console.log('✅ Backup gerado com sucesso:', {
-                                funcionarios: backup.dados.funcionarios.length,
-                                fornecedores: backup.dados.fornecedores.length,
-                                documentacao: backup.dados.documentacao.length,
-                                cursosHabilitados: backup.dados.cursosHabilitados.length,
-                                presenca: backup.dados.presenca ? 'INCLUÍDO' : 'NÃO',
-                                presencaBanco: backup.dados.presencaBanco.length + ' registros'
-                            });
-                            
-                            res.json(backup);
-                        });
-                    });
-                });
-            });
+        backup.dados.fornecedores = fornecedores || [];
+        backup.dados.documentacao = documentacao || [];
+        backup.dados.configuracao = configuracao || {};
+        backup.dados.cursosHabilitados = cursosHabilitados || [];
+        backup.dados.configuracoesNR = configuracoesNR || [];
+        backup.dados.presencaBanco = presencaBanco || [];
+        backup.dados.historicoPresenca = historicoPresenca || [];
+        backup.dados.mudancasFuncao = mudancasFuncao || [];
+        backup.dados.empresasOcultas = empresasOcultas || [];
+        backup.dados.auditLog = auditLog || [];
+        
+        // INCLUIR DADOS DE PRESENÇA EM MEMÓRIA
+        backup.dados.presenca = {
+            presencaMemoria: presencaMemoria,
+            comentariosPresenca: comentariosPresenca,
+            ocorrenciasPresenca: ocorrenciasPresenca,
+            funcionariosOcultos: funcionariosOcultos,
+            presencaMesAtual: presencaMesAtual
+        };
+
+        console.log('✅ Backup completo gerado com sucesso:', {
+            funcionarios: backup.dados.funcionarios.length,
+            fornecedores: backup.dados.fornecedores.length,
+            documentacao: backup.dados.documentacao.length,
+            presencaBanco: backup.dados.presencaBanco.length,
+            historico: backup.dados.historicoPresenca.length
         });
-    });
+
+        await registrarLog(req, 'Exportar Backup', `Exportou backup completo do sistema (${backup.dados.funcionarios.length} funcionários, ${backup.dados.fornecedores.length} fornecedores)`);
+        
+        res.json(backup);
+    } catch (error) {
+        console.error('❌ Erro ao gerar backup:', error);
+        res.status(500).json({ error: 'Erro ao gerar backup: ' + error.message });
+    }
 });
 
-// Restaurar backup - VERSÃO ROBUSTA COM PROMISES
+// Restaurar backup - VERSÃO ROBUSTA PARA DB HÍBRIDO
 app.post('/api/backup/restaurar', async (req, res) => {
     console.log('📥 Recebendo requisição de restauração...');
-    console.log('   Content-Type:', req.headers['content-type']);
-    console.log('   Content-Length:', req.headers['content-length']);
-    
     const backup = req.body;
     
-    if (!backup) {
-        console.log('❌ Backup vazio ou undefined');
-        return res.status(400).json({ success: false, error: 'Nenhum dado de backup recebido' });
+    if (!backup || !backup.dados) {
+        return res.status(400).json({ success: false, error: 'Arquivo de backup inválido' });
     }
-    
-    if (!backup.dados) {
-        console.log('❌ Backup sem propriedade "dados"');
-        console.log('   Chaves recebidas:', Object.keys(backup));
-        return res.status(400).json({ success: false, error: 'Arquivo de backup inválido - falta propriedade "dados"' });
-    }
-    
-    console.log('🔄 Iniciando restauração de backup...');
-    console.log('   Funcionários:', backup.dados.funcionarios?.length || 0);
-    console.log('   Fornecedores:', backup.dados.fornecedores?.length || 0);
-    console.log('   Documentação:', backup.dados.documentacao?.length || 0);
-    console.log('   Presença:', backup.dados.presenca ? 'SIM' : 'NÃO');
     
     let erros = [];
     let restaurados = { funcionarios: 0, fornecedores: 0, documentacao: 0, presenca: false };
     
     try {
-        // Limpar tabelas
-        await new Promise((resolve, reject) => {
-            db.serialize(() => {
-                db.run('DELETE FROM SSMA');
-                db.run('DELETE FROM FORNECEDOR');
-                db.run('DELETE FROM DOCUMENTACAO');
-                db.run("DELETE FROM sqlite_sequence WHERE name='SSMA'");
-                db.run("DELETE FROM sqlite_sequence WHERE name='FORNECEDOR'");
-                db.run("DELETE FROM sqlite_sequence WHERE name='DOCUMENTACAO'", resolve);
-            });
-        });
+        // Limpar tabelas de forma sequencial
+        await db.run('DELETE FROM SSMA');
+        await db.run('DELETE FROM FORNECEDOR');
+        await db.run('DELETE FROM DOCUMENTACAO');
+        
+        if (DB_TYPE === 'sqlite') {
+            try { await db.run("DELETE FROM sqlite_sequence WHERE name='SSMA'"); } catch(e) {}
+            try { await db.run("DELETE FROM sqlite_sequence WHERE name='FORNECEDOR'"); } catch(e) {}
+            try { await db.run("DELETE FROM sqlite_sequence WHERE name='DOCUMENTACAO'"); } catch(e) {}
+        }
         
         console.log('✅ Tabelas limpas');
         
+        // Colunas válidas da tabela SSMA (exclui colunas calculadas como temFoto)
+        const COLUNAS_SSMA_VALIDAS = new Set([
+            'id', 'Nome', 'Empresa', 'Funcao', 'Celular', 'CPF', 'DataEmissao', 'Vencimento', 'Anotacoes', 'Situacao', 'Ambientacao',
+            'Nr06_DataEmissao', 'Nr06_Vencimento', 'Nr06_Status', 'Nr06_NumControle', 'Nr06_AnoControle', 'Nr06_Validade2Anos', 'Nr06_Validade8Meses',
+            'Nr10_DataEmissao', 'Nr10_Vencimento', 'Nr10_Status', 'Nr10_NumControle', 'Nr10_AnoControle', 'Nr10_Validade2Anos', 'Nr10_Validade8Meses',
+            'Nr11_DataEmissao', 'Nr11_Vencimento', 'Nr11_Status', 'Nr11_NumControle', 'Nr11_AnoControle', 'Nr11_Validade2Anos', 'Nr11_Validade8Meses',
+            'Nr12_DataEmissao', 'Nr12_Vencimento', 'NR12_Vencimento', 'Nr12_Status', 'Nr12_Ferramenta', 'Nr12_NumControle', 'Nr12_AnoControle', 'Nr12_Validade2Anos', 'Nr12_Validade8Meses',
+            'Nr17_DataEmissao', 'Nr17_Vencimento', 'Nr17_Status', 'Nr17_NumControle', 'Nr17_AnoControle', 'Nr17_Validade2Anos', 'Nr17_Validade8Meses',
+            'Nr18_DataEmissao', 'Nr18_Vencimento', 'NR18_Vencimento', 'Nr18_Status', 'Nr18_NumControle', 'Nr18_AnoControle', 'Nr18_Validade2Anos', 'Nr18_Validade8Meses',
+            'Nr20_DataEmissao', 'Nr20_Vencimento', 'Nr20_Status', 'Nr20_NumControle', 'Nr20_AnoControle', 'Nr20_Validade2Anos', 'Nr20_Validade8Meses',
+            'Nr33_DataEmissao', 'Nr33_Vencimento', 'NR33_Vencimento', 'Nr33_Status', 'Nr33_DataFim', 'Nr33_NumControle', 'Nr33_AnoControle', 'Nr33_Validade2Anos', 'Nr33_Validade8Meses',
+            'Nr34_DataEmissao', 'Nr34_Vencimento', 'Nr34_Status',
+            'Nr35_DataEmissao', 'Nr35_Vencimento', 'NR35_Vencimento', 'Nr35_Status', 'Nr35_NumControle', 'Nr35_AnoControle', 'Nr35_Validade2Anos', 'Nr35_Validade8Meses',
+            'Epi_DataEmissao', 'epiVencimento', 'EpiStatus', 'Epi_Validade8Meses',
+            'Foto', 'Cadastro', 'DataInativacao', 'IgnorarInvalidez'
+        ]);
+
         // Restaurar funcionários
         if (backup.dados.funcionarios && backup.dados.funcionarios.length > 0) {
             for (const f of backup.dados.funcionarios) {
                 try {
-                    const funcionario = { ...f };
-                    
-                    // Converter foto
+                    const funcionario = {};
+                    for (const [k, v] of Object.entries(f)) {
+                        if (COLUNAS_SSMA_VALIDAS.has(k)) funcionario[k] = v;
+                    }
+
+                    // Converter foto de base64/Buffer para Buffer binário
                     if (funcionario.Foto) {
                         if (typeof funcionario.Foto === 'string') {
                             funcionario.Foto = Buffer.from(funcionario.Foto, 'base64');
@@ -4471,27 +4937,18 @@ app.post('/api/backup/restaurar', async (req, res) => {
                             funcionario.Foto = Buffer.from(funcionario.Foto.data);
                         }
                     }
-                    
+
                     const colunas = Object.keys(funcionario);
                     const valores = Object.values(funcionario);
                     const placeholders = colunas.map(() => '?').join(', ');
                     
-                    await new Promise((resolve, reject) => {
-                        db.run(`INSERT INTO SSMA (${colunas.join(', ')}) VALUES (${placeholders})`, valores, function(err) {
-                            if (err) reject(err);
-                            else {
-                                restaurados.funcionarios++;
-                                resolve();
-                            }
-                        });
-                    });
+                    await db.run(`INSERT INTO SSMA (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
+                    restaurados.funcionarios++;
                 } catch (err) {
                     erros.push('Funcionário ' + f.Nome + ': ' + err.message);
                 }
             }
         }
-        
-        console.log('✅ Funcionários restaurados:', restaurados.funcionarios);
         
         // Restaurar fornecedores
         if (backup.dados.fornecedores && backup.dados.fornecedores.length > 0) {
@@ -4500,23 +4957,13 @@ app.post('/api/backup/restaurar', async (req, res) => {
                     const colunas = Object.keys(f);
                     const valores = Object.values(f);
                     const placeholders = colunas.map(() => '?').join(', ');
-                    
-                    await new Promise((resolve, reject) => {
-                        db.run(`INSERT INTO FORNECEDOR (${colunas.join(', ')}) VALUES (${placeholders})`, valores, function(err) {
-                            if (err) reject(err);
-                            else {
-                                restaurados.fornecedores++;
-                                resolve();
-                            }
-                        });
-                    });
+                    await db.run(`INSERT INTO FORNECEDOR (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
+                    restaurados.fornecedores++;
                 } catch (err) {
                     erros.push('Fornecedor ' + f.Empresa + ': ' + err.message);
                 }
             }
         }
-        
-        console.log('✅ Fornecedores restaurados:', restaurados.fornecedores);
         
         // Restaurar documentação
         if (backup.dados.documentacao && backup.dados.documentacao.length > 0) {
@@ -4525,158 +4972,142 @@ app.post('/api/backup/restaurar', async (req, res) => {
                     const colunas = Object.keys(d);
                     const valores = Object.values(d);
                     const placeholders = colunas.map(() => '?').join(', ');
-                    
-                    await new Promise((resolve, reject) => {
-                        db.run(`INSERT INTO DOCUMENTACAO (${colunas.join(', ')}) VALUES (${placeholders})`, valores, function(err) {
-                            if (err) reject(err);
-                            else {
-                                restaurados.documentacao++;
-                                resolve();
-                            }
-                        });
-                    });
+                    await db.run(`INSERT INTO DOCUMENTACAO (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
+                    restaurados.documentacao++;
                 } catch (err) {
                     erros.push('Documentação ' + d.empresa + ': ' + err.message);
                 }
             }
         }
         
-        console.log('✅ Documentação restaurada:', restaurados.documentacao);
-        
-        // Restaurar cursos habilitados
-        if (backup.dados.cursosHabilitados && backup.dados.cursosHabilitados.length > 0) {
-            await new Promise((resolve) => {
-                db.run('DELETE FROM habilitar_cursos', resolve);
-            });
-            
-            for (const c of backup.dados.cursosHabilitados) {
-                const colunas = Object.keys(c);
-                const valores = Object.values(c);
-                const placeholders = colunas.map(() => '?').join(', ');
-                await new Promise((resolve) => {
-                    db.run(`INSERT INTO habilitar_cursos (${colunas.join(', ')}) VALUES (${placeholders})`, valores, resolve);
-                });
-            }
-        }
-        
-        // Restaurar configuração
-        if (backup.dados.configuracao && Object.keys(backup.dados.configuracao).length > 0) {
-            const config = backup.dados.configuracao;
-            await new Promise((resolve) => {
-                db.run('DELETE FROM configuracao_relatorio WHERE id = 1', resolve);
-            });
-            
-            const colunas = Object.keys(config);
-            const valores = Object.values(config);
-            const placeholders = colunas.map(() => '?').join(', ');
-            await new Promise((resolve) => {
-                db.run(`INSERT INTO configuracao_relatorio (${colunas.join(', ')}) VALUES (${placeholders})`, valores, resolve);
-            });
-        }
-        
-        // Restaurar presença (MEMÓRIA + BANCO)
+        // Restaurar presença
         if (backup.dados.presenca) {
-            try {
-                // Restaurar dados em memória
-                presencaMemoria = backup.dados.presenca.presencaMemoria || {};
-                comentariosPresenca = backup.dados.presenca.comentariosPresenca || {};
-                ocorrenciasPresenca = backup.dados.presenca.ocorrenciasPresenca || {};
-                funcionariosOcultos = backup.dados.presenca.funcionariosOcultos || {};
-                presencaMesAtual = backup.dados.presenca.presencaMesAtual || getMesAnoAtual();
-                salvarDadosPresenca();
-                
-                // Restaurar tabela PRESENCA do banco
-                if (backup.dados.presencaBanco && backup.dados.presencaBanco.length > 0) {
-                    // Limpar tabela PRESENCA
-                    await new Promise((resolve) => {
-                        db.run('DELETE FROM PRESENCA', resolve);
-                    });
-                    
-                    // Inserir registros
-                    for (const p of backup.dados.presencaBanco) {
-                        const colunas = Object.keys(p);
-                        const valores = Object.values(p);
-                        const placeholders = colunas.map(() => '?').join(', ');
-                        await new Promise((resolve) => {
-                            db.run(`INSERT INTO PRESENCA (${colunas.join(', ')}) VALUES (${placeholders})`, valores, resolve);
-                        });
-                    }
-                    console.log(`✅ Presença do banco restaurada: ${backup.dados.presencaBanco.length} registros`);
+            presencaMemoria = backup.dados.presenca.presencaMemoria || {};
+            comentariosPresenca = backup.dados.presenca.comentariosPresenca || {};
+            ocorrenciasPresenca = backup.dados.presenca.ocorrenciasPresenca || {};
+            funcionariosOcultos = backup.dados.presenca.funcionariosOcultos || {};
+            presencaMesAtual = backup.dados.presenca.presencaMesAtual || getMesAnoAtual();
+            salvarDadosPresenca();
+            
+            if (backup.dados.presencaBanco && backup.dados.presencaBanco.length > 0) {
+                await db.run('DELETE FROM PRESENCA');
+                for (const p of backup.dados.presencaBanco) {
+                    const colunas = Object.keys(p);
+                    const valores = Object.values(p);
+                    const placeholders = colunas.map(() => '?').join(', ');
+                    await db.run(`INSERT INTO PRESENCA (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
                 }
-                
-                restaurados.presenca = true;
-                console.log('✅ Presença restaurada (memória + banco)');
-            } catch (err) {
-                erros.push('Erro ao restaurar presença: ' + err.message);
+            }
+            restaurados.presenca = true;
+        }
+
+        // Restaurar histórico de presença
+        if (backup.dados.historicoPresenca && backup.dados.historicoPresenca.length > 0) {
+            await db.run('DELETE FROM HISTORICO_PRESENCA');
+            for (const h of backup.dados.historicoPresenca) {
+                const colunas = Object.keys(h);
+                const valores = Object.values(h);
+                const placeholders = colunas.map(() => '?').join(', ');
+                await db.run(`INSERT INTO HISTORICO_PRESENCA (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
             }
         }
-        
-        console.log('✅ Restauração concluída:', restaurados);
-        if (erros.length > 0) {
-            console.log('⚠️ Erros:', erros);
+
+        // Restaurar mudanças de função
+        if (backup.dados.mudancasFuncao && backup.dados.mudancasFuncao.length > 0) {
+            await db.run('DELETE FROM MUDANCA_FUNCAO_PRESENCA');
+            for (const m of backup.dados.mudancasFuncao) {
+                const colunas = Object.keys(m);
+                const valores = Object.values(m);
+                const placeholders = colunas.map(() => '?').join(', ');
+                await db.run(`INSERT INTO MUDANCA_FUNCAO_PRESENCA (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
+            }
+        }
+
+        // Restaurar empresas ocultas
+        if (backup.dados.empresasOcultas && backup.dados.empresasOcultas.length > 0) {
+            await db.run('DELETE FROM EMPRESAS_OCULTAS');
+            for (const e of backup.dados.empresasOcultas) {
+                const colunas = Object.keys(e);
+                const valores = Object.values(e);
+                const placeholders = colunas.map(() => '?').join(', ');
+                await db.run(`INSERT INTO EMPRESAS_OCULTAS (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
+            }
+        }
+
+        // Restaurar audit log
+        if (backup.dados.auditLog && backup.dados.auditLog.length > 0) {
+            await db.run('DELETE FROM AUDIT_LOG');
+            for (const a of backup.dados.auditLog) {
+                const colunas = Object.keys(a);
+                const valores = Object.values(a);
+                const placeholders = colunas.map(() => '?').join(', ');
+                await db.run(`INSERT INTO AUDIT_LOG (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
+            }
+        }
+
+        // Restaurar configurações de NRs
+        if (backup.dados.configuracoesNR && backup.dados.configuracoesNR.length > 0) {
+            for (const cfg of backup.dados.configuracoesNR) {
+                try {
+                    const sql = DB_TYPE === 'sqlite'
+                        ? `INSERT INTO configuracao_nrs (nr, dados, dataAtualizacao) VALUES (?, ?, datetime('now', 'localtime')) 
+                           ON CONFLICT(nr) DO UPDATE SET dados = excluded.dados, dataAtualizacao = datetime('now', 'localtime')`
+                        : `INSERT INTO configuracao_nrs (nr, dados, dataAtualizacao) VALUES ($1, $2, CURRENT_TIMESTAMP) 
+                           ON CONFLICT(nr) DO UPDATE SET dados = EXCLUDED.dados, dataAtualizacao = CURRENT_TIMESTAMP`;
+                    await db.run(sql, [cfg.nr, cfg.dados]);
+                } catch (err) {
+                    erros.push('Configuração NR ' + cfg.nr + ': ' + err.message);
+                }
+            }
+            restaurados.configuracoesNR = backup.dados.configuracoesNR.length;
         }
         
-        res.json({ 
-            success: true, 
-            message: 'Backup restaurado com sucesso',
-            restaurados: restaurados,
-            erros: erros.length > 0 ? erros : undefined
-        });
-        
+        res.json({ success: true, message: 'Backup restaurado com sucesso', restaurados, erros: erros.length > 0 ? erros : undefined });
+        await registrarLog(req, 'Restaurar Backup', `Restaurou backup completo (${restaurados.funcionarios} funcionários, ${restaurados.fornecedores} fornecedores, ${restaurados.documentacao} documentações)`);
     } catch (err) {
         console.error('❌ Erro na restauração:', err);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Erro ao restaurar backup: ' + err.message,
-            restaurados: restaurados
-        });
+        res.status(500).json({ success: false, error: 'Erro ao restaurar backup: ' + err.message });
     }
 });
 
 // Zerar funcionários
-app.delete('/api/backup/zerar/funcionarios', (req, res) => {
-    db.serialize(() => {
-        db.run('DELETE FROM SSMA', function(err) {
-            if (err) return res.status(500).json({ success: false, error: err.message });
-            
-            db.run("DELETE FROM sqlite_sequence WHERE name='SSMA'", function(err) {
-                if (err) console.log('Erro ao resetar sequence:', err);
-                res.json({ success: true, message: 'Funcionários zerados com sucesso' });
-            });
-        });
-    });
+app.delete('/api/backup/zerar/funcionarios', async (req, res) => {
+    try {
+        await db.run('DELETE FROM SSMA');
+        if (DB_TYPE === 'sqlite') await db.run("DELETE FROM sqlite_sequence WHERE name='SSMA'");
+        await registrarLog(req, 'Zerar Funcionários', 'Zerou todos os registros de funcionários (SSMA)');
+        res.json({ success: true, message: 'Funcionários zerados com sucesso' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // Zerar fornecedores
-app.delete('/api/backup/zerar/fornecedores', (req, res) => {
-    db.serialize(() => {
-        db.run('DELETE FROM FORNECEDOR', function(err) {
-            if (err) return res.status(500).json({ success: false, error: err.message });
-            
-            db.run("DELETE FROM sqlite_sequence WHERE name='FORNECEDOR'", function(err) {
-                if (err) console.log('Erro ao resetar sequence:', err);
-                res.json({ success: true, message: 'Fornecedores zerados com sucesso' });
-            });
-        });
-    });
+app.delete('/api/backup/zerar/fornecedores', async (req, res) => {
+    try {
+        await db.run('DELETE FROM FORNECEDOR');
+        if (DB_TYPE === 'sqlite') await db.run("DELETE FROM sqlite_sequence WHERE name='FORNECEDOR'");
+        await registrarLog(req, 'Zerar Fornecedores', 'Zerou todos os registros de fornecedores');
+        res.json({ success: true, message: 'Fornecedores zerados com sucesso' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // Zerar documentação
-app.delete('/api/backup/zerar/documentacao', (req, res) => {
-    db.serialize(() => {
-        db.run('DELETE FROM DOCUMENTACAO', function(err) {
-            if (err) return res.status(500).json({ success: false, error: err.message });
-            
-            db.run("DELETE FROM sqlite_sequence WHERE name='DOCUMENTACAO'", function(err) {
-                if (err) console.log('Erro ao resetar sequence:', err);
-                res.json({ success: true, message: 'Documentação zerada com sucesso' });
-            });
-        });
-    });
+app.delete('/api/backup/zerar/documentacao', async (req, res) => {
+    try {
+        await db.run('DELETE FROM DOCUMENTACAO');
+        if (DB_TYPE === 'sqlite') await db.run("DELETE FROM sqlite_sequence WHERE name='DOCUMENTACAO'");
+        await registrarLog(req, 'Zerar Documentação', 'Zerou todos os registros de documentação PGR/PCMSO');
+        res.json({ success: true, message: 'Documentação zerada com sucesso' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // Zerar lista de presença
-app.delete('/api/backup/zerar/presenca', (req, res) => {
+app.delete('/api/backup/zerar/presenca', async (req, res) => {
     try {
         // Limpar dados em memória
         presencaMemoria = {};
@@ -4688,6 +5119,7 @@ app.delete('/api/backup/zerar/presenca', (req, res) => {
         salvarDadosPresenca();
         
         console.log('✅ Lista de presença zerada com sucesso');
+        await registrarLog(req, 'Zerar Presença', 'Zerou todos os dados de presença do mês atual');
         res.json({ success: true, message: 'Lista de presença zerada com sucesso' });
     } catch (err) {
         console.error('Erro ao zerar presença:', err);
@@ -4718,8 +5150,8 @@ app.post('/api/backup/corrigir-funcoes', (req, res) => {
 });
 
 // GET - Alimentar a "Janela de Monitoramento de 30 Dias" (DESLIZANTE)
-app.get('/api/tabela-mes/monitoramento', (req, res) => {
-    verificarResetMes();
+app.get('/api/tabela-mes/monitoramento', async (req, res) => {
+    await verificarResetMes();
 
     // Feriados brasileiros de 2026
     const feriados = ['01-01', '02-16', '02-17', '04-21', '05-01', '09-07', '10-12', '11-02', '11-20', '12-25'];
@@ -4776,163 +5208,92 @@ app.get('/api/tabela-mes/monitoramento', (req, res) => {
     console.log(`📊 Total de datas na janela: ${datasJanela.length}`);
     console.log(`📊 Meses na janela: ${Array.from(mesesParaBuscar).join(', ')}`);
 
-    // Buscar dados do banco para essa janela
     const mesesLista = Array.from(mesesParaBuscar).map(m => `'${m}'`).join(',');
 
-    const sqlTodasFuncoes = `
-        SELECT DISTINCT funcionarioFuncao as funcao 
-        FROM PRESENCA 
-        WHERE mesAno IN (${mesesLista})
-        ORDER BY funcionarioFuncao
-    `;
+    try {
+        const [funcaoRows, todasFuncoesRows, empresaRows, todasEmpresasRows] = await Promise.all([
+            db.all(`SELECT p.mesAno, p.funcionarioFuncao as funcao, p.dia, SUM(CASE WHEN p.status = 'P' THEN 1 ELSE 0 END) as totalPresenca, SUM(CASE WHEN p.status = 'F' THEN 1 ELSE 0 END) as totalFalta FROM PRESENCA p WHERE p.mesAno IN (${mesesLista}) GROUP BY p.mesAno, p.funcionarioFuncao, p.dia`),
+            db.all(`SELECT DISTINCT funcionarioFuncao as funcao FROM PRESENCA WHERE mesAno IN (${mesesLista}) ORDER BY funcionarioFuncao`),
+            db.all(`SELECT p.mesAno, p.funcionarioEmpresa as empresa, p.dia, SUM(CASE WHEN p.status = 'P' THEN 1 ELSE 0 END) as totalPresenca, SUM(CASE WHEN p.status = 'F' THEN 1 ELSE 0 END) as totalFalta FROM PRESENCA p WHERE p.mesAno IN (${mesesLista}) AND p.funcionarioEmpresa NOT IN (SELECT empresaOculta FROM EMPRESAS_OCULTAS) GROUP BY p.mesAno, p.funcionarioEmpresa, p.dia`),
+            db.all(`SELECT DISTINCT funcionarioEmpresa as empresa FROM PRESENCA WHERE mesAno IN (${mesesLista}) AND funcionarioEmpresa NOT IN (SELECT empresaOculta FROM EMPRESAS_OCULTAS) ORDER BY funcionarioEmpresa`)
+        ]);
 
-    const sqlFuncao = `
-        SELECT p.mesAno, p.funcionarioFuncao as funcao, p.dia,
-               SUM(CASE WHEN p.status = 'P' THEN 1 ELSE 0 END) as totalPresenca,
-               SUM(CASE WHEN p.status = 'F' THEN 1 ELSE 0 END) as totalFalta
-        FROM PRESENCA p
-        WHERE p.mesAno IN (${mesesLista})
-        GROUP BY p.mesAno, p.funcionarioFuncao, p.dia
-        ORDER BY funcao, p.mesAno, p.dia
-    `;
+        const mapaIndice = {};
+        datasJanela.forEach((dt, idx) => { mapaIndice[`${dt.mesAno}-${dt.dia}`] = idx; });
 
-    const sqlEmpresa = `
-        SELECT p.mesAno, p.funcionarioEmpresa as empresa, p.dia,
-               SUM(CASE WHEN p.status = 'P' THEN 1 ELSE 0 END) as totalPresenca,
-               SUM(CASE WHEN p.status = 'F' THEN 1 ELSE 0 END) as totalFalta
-        FROM PRESENCA p
-        WHERE p.mesAno IN (${mesesLista}) AND p.funcionarioEmpresa NOT IN (
-            SELECT empresaOculta FROM EMPRESAS_OCULTAS
-        )
-        GROUP BY p.mesAno, p.funcionarioEmpresa, p.dia
-        ORDER BY empresa, p.mesAno, p.dia
-    `;
+        const funcaoPorDia = {};
+        const faltasPorFuncaoPorDia = {};
+        const funcoesUnicas = new Set();
+        const totalPorDiaFuncao = Array(31).fill(0);
 
-    const sqlTodasEmpresas = `
-        SELECT DISTINCT funcionarioEmpresa as empresa 
-        FROM PRESENCA 
-        WHERE mesAno IN (${mesesLista}) AND funcionarioEmpresa NOT IN (
-            SELECT empresaOculta FROM EMPRESAS_OCULTAS
-        )
-        ORDER BY funcionarioEmpresa
-    `;
-
-    db.all(sqlFuncao, [], (err, funcaoRows) => {
-        if (err) return res.status(500).json({ error: err.message });
-
-        db.all(sqlTodasFuncoes, [], (err, todasFuncoesRows) => {
-            if (err) return res.status(500).json({ error: err.message });
-
-            db.all(sqlEmpresa, [], (err, empresaRows) => {
-                if (err) return res.status(500).json({ error: err.message });
-
-                db.all(sqlTodasEmpresas, [], (err, todasEmpresasRows) => {
-                    if (err) return res.status(500).json({ error: err.message });
-
-                    // Criar mapa de índice (0-30 para 31 dias)
-                    const mapaIndice = {};
-                    datasJanela.forEach((dt, idx) => {
-                        mapaIndice[`${dt.mesAno}-${dt.dia}`] = idx;
-                    });
-
-                    // Montar os arrays de 31 posições
-                    const funcaoPorDia = {};
-                    const faltasPorFuncaoPorDia = {};
-                    const funcoesUnicas = new Set();
-
-                    // Inicializar com 31 posições
-                    todasFuncoesRows.forEach(row => {
-                        if (row.funcao) {
-                            funcoesUnicas.add(row.funcao);
-                            funcaoPorDia[row.funcao] = Array(31).fill(0);
-                            faltasPorFuncaoPorDia[row.funcao] = Array(31).fill(0);
-                        }
-                    });
-
-                    // Preencher com dados reais do banco
-                    funcaoRows.forEach(row => {
-                        funcoesUnicas.add(row.funcao);
-                        if (!funcaoPorDia[row.funcao]) {
-                            funcaoPorDia[row.funcao] = Array(31).fill(0);
-                            faltasPorFuncaoPorDia[row.funcao] = Array(31).fill(0);
-                        }
-
-                        const idx = mapaIndice[`${row.mesAno}-${row.dia}`];
-                        if (idx !== undefined) {
-                            funcaoPorDia[row.funcao][idx] = row.totalPresenca;
-                            faltasPorFuncaoPorDia[row.funcao][idx] = row.totalFalta;
-                        }
-                    });
-
-                    // Montar dados de empresa
-                    const empresaPorDia = {};
-                    const faltasPorEmpresaPorDia = {};
-                    const empresasUnicas = new Set();
-
-                    // Inicializar com 31 posições
-                    todasEmpresasRows.forEach(row => {
-                        if (row.empresa) {
-                            empresasUnicas.add(row.empresa);
-                            empresaPorDia[row.empresa] = Array(31).fill(0);
-                            faltasPorEmpresaPorDia[row.empresa] = Array(31).fill(0);
-                        }
-                    });
-
-                    // Preencher com dados reais do banco
-                    empresaRows.forEach(row => {
-                        empresasUnicas.add(row.empresa);
-                        if (!empresaPorDia[row.empresa]) {
-                            empresaPorDia[row.empresa] = Array(31).fill(0);
-                            faltasPorEmpresaPorDia[row.empresa] = Array(31).fill(0);
-                        }
-
-                        const idx = mapaIndice[`${row.mesAno}-${row.dia}`];
-                        if (idx !== undefined) {
-                            empresaPorDia[row.empresa][idx] = row.totalPresenca;
-                            faltasPorEmpresaPorDia[row.empresa][idx] = row.totalFalta;
-                        }
-                    });
-
-                    // Calcular totais por coluna (dia)
-                    const totalPorDiaFuncao = Array(31).fill(0);
-                    const totalPorDiaEmpresa = Array(31).fill(0);
-
-                    // Somar totais por dia para funções
-                    Array.from(funcoesUnicas).forEach(funcao => {
-                        for (let i = 0; i < 31; i++) {
-                            totalPorDiaFuncao[i] += funcaoPorDia[funcao][i];
-                        }
-                    });
-
-                    // Somar totais por dia para empresas
-                    Array.from(empresasUnicas).forEach(empresa => {
-                        for (let i = 0; i < 31; i++) {
-                            totalPorDiaEmpresa[i] += empresaPorDia[empresa][i];
-                        }
-                    });
-
-                    // Retornar resposta
-                    res.json({
-                        datas: datasJanela,
-                        funcaoPorDia: funcaoPorDia,
-                        empresaPorDia: empresaPorDia,
-                        faltasPorFuncaoPorDia: faltasPorFuncaoPorDia,
-                        faltasPorEmpresaPorDia: faltasPorEmpresaPorDia,
-                        funcoesUnicas: Array.from(funcoesUnicas).sort(),
-                        empresasUnicas: Array.from(empresasUnicas).sort(),
-                        totalPorDiaFuncao: totalPorDiaFuncao,
-                        totalPorDiaEmpresa: totalPorDiaEmpresa,
-                        totalDias: 31,
-                        janelaInicio: dataInicio.toLocaleDateString('pt-BR'),
-                        janelaFim: hoje.toLocaleDateString('pt-BR'),
-                        dataInicio: dataInicio,
-                        dataFim: hoje,
-                        timestamp: new Date().getTime()
-                    });
-                });
-            });
+        todasFuncoesRows.forEach(row => {
+            if (row.funcao) {
+                funcoesUnicas.add(row.funcao);
+                funcaoPorDia[row.funcao] = Array(31).fill(0);
+                faltasPorFuncaoPorDia[row.funcao] = Array(31).fill(0);
+            }
         });
-    });
+
+        funcaoRows.forEach(row => {
+            if (!funcaoPorDia[row.funcao]) {
+                funcaoPorDia[row.funcao] = Array(31).fill(0);
+                faltasPorFuncaoPorDia[row.funcao] = Array(31).fill(0);
+            }
+            const idx = mapaIndice[`${row.mesAno}-${row.dia}`];
+            if (idx !== undefined) {
+                funcaoPorDia[row.funcao][idx] = row.totalPresenca;
+                faltasPorFuncaoPorDia[row.funcao][idx] = row.totalFalta;
+                totalPorDiaFuncao[idx] += row.totalPresenca;
+            }
+        });
+
+        const empresaPorDia = {};
+        const faltasPorEmpresaPorDia = {};
+        const empresasUnicas = new Set();
+        const totalPorDiaEmpresa = Array(31).fill(0);
+
+        todasEmpresasRows.forEach(row => {
+            if (row.empresa) {
+                empresasUnicas.add(row.empresa);
+                empresaPorDia[row.empresa] = Array(31).fill(0);
+                faltasPorEmpresaPorDia[row.empresa] = Array(31).fill(0);
+            }
+        });
+
+        empresaRows.forEach(row => {
+            if (!empresaPorDia[row.empresa]) {
+                empresaPorDia[row.empresa] = Array(31).fill(0);
+                faltasPorEmpresaPorDia[row.empresa] = Array(31).fill(0);
+            }
+            const idx = mapaIndice[`${row.mesAno}-${row.dia}`];
+            if (idx !== undefined) {
+                empresaPorDia[row.empresa][idx] = row.totalPresenca;
+                faltasPorEmpresaPorDia[row.empresa][idx] = row.totalFalta;
+                totalPorDiaEmpresa[idx] += row.totalPresenca;
+            }
+        });
+
+        res.json({
+            datas: datasJanela,
+            funcaoPorDia,
+            empresaPorDia,
+            faltasPorFuncaoPorDia,
+            faltasPorEmpresaPorDia,
+            funcoesUnicas: Array.from(funcoesUnicas).sort(),
+            empresasUnicas: Array.from(empresasUnicas).sort(),
+            totalPorDiaFuncao,
+            totalPorDiaEmpresa,
+            totalDias: 31,
+            janelaInicio: dataInicio.toLocaleDateString('pt-BR'),
+            janelaFim: hoje.toLocaleDateString('pt-BR'),
+            dataInicio,
+            dataFim: hoje,
+            timestamp: Date.now()
+        });
+    } catch (err) {
+        console.error('❌ Erro no monitoramento:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // GET - Endpoint para verificar se há atualizações (para polling do frontend)
@@ -4959,51 +5320,53 @@ app.listen(PORT, '0.0.0.0', async () => {
     await verificarResetMes();
 });
 
-// Graceful shutdown
+// Graceful shutdown consolidado
 process.on('SIGINT', () => {
+    console.log('\n💾 Encerrando servidor com segurança...');
+    console.log('💾 Salvando dados de presença...');
+    salvarDadosPresenca();
+    
     db.close((err) => {
         if (err) {
-            console.error(err.message);
+            console.error('❌ Erro ao fechar banco:', err.message);
+        } else {
+            console.log('✅ Conexão com banco fechada.');
         }
-        console.log('Conexão com banco fechada.');
         process.exit(0);
     });
 });
 
+
 // ROTAS PARA TABELAS AUXILIARES (Dropdowns)
 
 // GET - Listar nomes únicos
-app.get('/api/nomes', (req, res) => {
-    db.all('SELECT DISTINCT Nome FROM SSMA WHERE Nome IS NOT NULL AND Nome != "" ORDER BY Nome', (err, rows) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
+app.get('/api/nomes', async (req, res) => {
+    try {
+        const rows = await db.all('SELECT DISTINCT Nome FROM SSMA WHERE Nome IS NOT NULL AND Nome != "" ORDER BY Nome');
         res.json(rows.map(row => row.Nome));
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // GET - Listar empresas únicas
-app.get('/api/empresas', (req, res) => {
-    // Buscar empresas da tabela FORNECEDOR (só ativos)
-    db.all('SELECT DISTINCT Empresa FROM FORNECEDOR WHERE Situacao = "S" AND Empresa IS NOT NULL AND Empresa != "" ORDER BY Empresa', (err, rows) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
+app.get('/api/empresas', async (req, res) => {
+    try {
+        const rows = await db.all('SELECT DISTINCT Empresa FROM FORNECEDOR WHERE Situacao = "S" AND Empresa IS NOT NULL AND Empresa != "" ORDER BY Empresa');
         res.json(rows.map(row => row.Empresa));
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // GET - Listar funções únicas
-app.get('/api/funcoes', (req, res) => {
-    db.all('SELECT DISTINCT Funcao FROM SSMA WHERE Funcao IS NOT NULL AND Funcao != "" ORDER BY Funcao', (err, rows) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
+app.get('/api/funcoes', async (req, res) => {
+    try {
+        const rows = await db.all('SELECT DISTINCT Funcao FROM SSMA WHERE Funcao IS NOT NULL AND Funcao != "" ORDER BY Funcao');
         res.json(rows.map(row => row.Funcao));
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 

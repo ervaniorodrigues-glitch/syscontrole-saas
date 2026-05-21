@@ -113,6 +113,28 @@
             font-size: 12px;
             margin-top: 15px;
         }
+        .signup-link {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 14px;
+            color: #666;
+        }
+        .signup-link a {
+            color: #1a5276;
+            text-decoration: none;
+            font-weight: bold;
+            border: 2px solid #87CEEB;
+            border-radius: 6px;
+            padding: 8px 16px;
+            display: inline-block;
+            margin-top: 10px;
+            transition: all 0.3s ease;
+        }
+        .signup-link a:hover {
+            background: #87CEEB;
+            color: #1a5276;
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body>
@@ -127,6 +149,7 @@
                 <p>Muitas tentativas incorretas.</p>
                 <p>Tente novamente em:</p>
                 <div class="timer" id="timerDisplay">00:00:00</div>
+                <button onclick="localStorage.removeItem('loginBlock'); location.reload();" style="margin-top:12px;padding:8px 16px;background:#1a5276;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">🔓 Desbloquear Agora</button>
             </div>
             <div id="errorMsg" class="error-msg"></div>
             <form id="loginForm">
@@ -138,15 +161,33 @@
                     <label for="senha">Senha</label>
                     <input type="password" id="senha" name="senha" required>
                 </div>
+
+                <div class="form-group" id="groupEmpresa" style="display: none;">
+                    <label for="tenant_code" style="color:#1a5276; font-weight:600;">Código da Empresa (Chave de Acesso)</label>
+                    <input type="text" id="tenant_code" name="tenant_code" placeholder="Ex: nome-1234">
+                    <small style="font-size:11px;color:#666;display:block;margin-top:4px;">Insira o Código da Empresa fornecido pelo seu administrador.</small>
+                </div>
+
                 <button type="submit" class="btn-login" id="btnLogin">Entrar</button>
+
+                <div style="text-align: center; margin-top: 15px; font-size: 13px;">
+                    <a href="#" id="btnAlternarAcesso" style="color: #1a5276; text-decoration: none; font-weight: 600; border-bottom: 1px dashed #1a5276;">🔑 Acesso para Funcionários</a>
+                </div>
             </form>
             <div class="attempts" id="attemptsInfo"></div>
+
+            <div style="border-top: 1px solid #eee; margin-top: 20px;"></div>
+
+            <div class="signup-link">
+                <span>Ainda não tem conta? Comece hoje!</span><br>
+                <a href="/cadastro.html">🚀 Criar Conta Gratuita (Trial)</a>
+            </div>
         </div>
     </div>
 
     <script>
-        const BLOCK_TIME = 2 * 60 * 60 * 1000; // 2 horas em ms
-        const MAX_ATTEMPTS = 3;
+        const BLOCK_TIME = 5 * 60 * 1000; // 5 minutos em ms
+        const MAX_ATTEMPTS = 5;
 
         function getBlockInfo() {
             const info = localStorage.getItem('loginBlock');
@@ -206,6 +247,28 @@
             }, 1000);
         }
 
+        // 🔑 Controle de Acesso de Funcionário (Flow 2 - Internal User)
+        let isAcessoInterno = false;
+        const btnAlternar = document.getElementById('btnAlternarAcesso');
+        const groupEmpresa = document.getElementById('groupEmpresa');
+        const inputEmpresa = document.getElementById('tenant_code');
+        
+        btnAlternar.addEventListener('click', (e) => {
+            e.preventDefault();
+            isAcessoInterno = !isAcessoInterno;
+            if (isAcessoInterno) {
+                groupEmpresa.style.display = 'block';
+                inputEmpresa.required = true;
+                inputEmpresa.focus();
+                btnAlternar.innerHTML = '👤 Sou Administrador (Acesso Direto)';
+            } else {
+                groupEmpresa.style.display = 'none';
+                inputEmpresa.required = false;
+                inputEmpresa.value = '';
+                btnAlternar.innerHTML = '🔑 Acesso para Funcionários';
+            }
+        });
+
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -213,12 +276,13 @@
             
             const login = document.getElementById('login').value.trim();
             const senha = document.getElementById('senha').value;
+            const tenant_code = isAcessoInterno ? inputEmpresa.value.trim() : null;
             
             try {
-                const response = await fetch('/api/auth/login', {
+                const response = await fetch('/api/saas/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ login, senha })
+                    body: JSON.stringify({ login, senha, tenant_code })
                 });
                 
                 const result = await response.json();

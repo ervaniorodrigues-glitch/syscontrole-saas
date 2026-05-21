@@ -3,52 +3,58 @@ node_modules/
 .env
 .DS_Store
 Thumbs.db
-*.accdb
-*.ldb
-backup*.json
-BACKUP*.json
-teste*.js
-verificar*.js
-corrigir*.js
-debug*.js
-analisar*.js
-buscar*.js
-limpar*.js
-importar*.js
-preencher*.js
-procurar*.js
-testar*.js
-criar*.js
-adicionar*.js
-atualizar*.js
-carregar*.js
-comparar*.js
-contar*.js
-converter*.js
-encontrar*.js
-executar*.js
-marcar*.js
-melhorar*.js
-reimportar*.js
-remover*.js
-renomear*.js
-restaurar*.js
-simplificar*.js
-ver*.js
-zerar*.js
-*.bat
-*.vbs
-*.ps1
-*.md
-!README.md
-!PASSO_A_PASSO_SIMPLES.md
-Excel/
-backup-manual/
-backup_syscontrole_*/
-Imagens do Projeto/
-.vs/
-.vscode/
-.kiro/
+
+# Bancos de dados locais (não subir para o servidor)
+*.db
+*.sqlite
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Pastas de tenants (dados locais)
+tenants/
+
+# Arquivos temporários e de debug
+tmp/
+scratch/
+check_*.js
+debug_*.js
+fix_*.js
+test_*.js
+tmp_*.js
+update_*.js
+list_*.js
+find_*.js
+init_*.js
+cleanup_*.js
+migrate-to-pg.js
+
+# Backups e dados locais
+presenca_dados.json
+usuarios.json
+gestor-config.json
+*.json.bak
+presenca_dados_*.json
+
+# Pastas de outros projetos
+SysControle/
+SysControle-Original/
+60-SysControle/
 15-SysControle/
 17-SysControle/
 SysControleWeb/
+Excel/
+backup-manual/
+Imagens do Projeto/
+
+# IDE
+.vscode/
+.kiro/
+.vs/
+
+# Outros
+*.bat
+*.vbs
+*.ps1
+*.accdb
+*.ldb
