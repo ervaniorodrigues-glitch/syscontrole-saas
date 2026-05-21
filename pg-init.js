@@ -167,10 +167,12 @@ async function initPostgres(client) {
             usuario TEXT NOT NULL,
             acao TEXT NOT NULL,
             detalhes TEXT,
+            ip TEXT,
+            navegador TEXT,
             dataHora TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`,
 
-        // 7. Mudanças de Função
+        // 8. Mudanças de Função
         `CREATE TABLE IF NOT EXISTS MUDANCA_FUNCAO_PRESENCA (
             id SERIAL PRIMARY KEY,
             mesAno TEXT NOT NULL,
@@ -183,14 +185,14 @@ async function initPostgres(client) {
             dataCriacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`,
 
-        // 8. Empresas Ocultas
+        // 9. Empresas Ocultas
         `CREATE TABLE IF NOT EXISTS EMPRESAS_OCULTAS (
             id SERIAL PRIMARY KEY,
             empresaOculta TEXT NOT NULL UNIQUE,
             dataCriacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`,
 
-        // 9. Rastreamento de Acessos
+        // 10. Rastreamento de Acessos
         `CREATE TABLE IF NOT EXISTS RASTREAMENTO_ACESSOS (
             id SERIAL PRIMARY KEY,
             tenant_id TEXT,
@@ -202,6 +204,40 @@ async function initPostgres(client) {
             dataHoraEntrada TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             dataHoraSaida TIMESTAMP,
             lastHeartbeat TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        // 11. Presença
+        `CREATE TABLE IF NOT EXISTS PRESENCA (
+            id SERIAL PRIMARY KEY,
+            mesAno TEXT NOT NULL,
+            funcionarioId INTEGER NOT NULL,
+            funcionarioNome TEXT,
+            funcionarioEmpresa TEXT,
+            funcionarioFuncao TEXT,
+            funcionarioSituacao TEXT,
+            dia INTEGER NOT NULL,
+            status TEXT,
+            comentario TEXT,
+            formatacao TEXT,
+            dataCriacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        // 12. Configurações de NRs
+        `CREATE TABLE IF NOT EXISTS configuracao_nrs (
+            id SERIAL PRIMARY KEY,
+            nr TEXT NOT NULL UNIQUE,
+            dados TEXT,
+            dataAtualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        // 13. Usuários do Tenant
+        `CREATE TABLE IF NOT EXISTS USUARIOS_TENANT (
+            id SERIAL PRIMARY KEY,
+            login TEXT NOT NULL UNIQUE,
+            senha TEXT NOT NULL,
+            nome TEXT NOT NULL,
+            tipo TEXT DEFAULT 'comum',
+            ativo INTEGER DEFAULT 1
         )`,
 
         // Índices
