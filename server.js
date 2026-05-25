@@ -33,13 +33,16 @@ const DB_TYPE = process.env.DB_TYPE || 'sqlite'; // 'sqlite' ou 'postgres'
 console.log(`🔌 Tipo de Banco de Dados Detectado: ${DB_TYPE.toUpperCase()}`);
 
 // Configurações do PostgreSQL (SaaS / Web)
-const pgConfig = {
+const pgConfig = process.env.DATABASE_URL ? {
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+} : {
     user: process.env.PG_USER || 'postgres',
     host: process.env.PG_HOST || 'localhost',
     database: process.env.PG_DATABASE || 'syscontrole',
     password: process.env.PG_PASSWORD || 'sua_senha_aqui',
-    port: process.env.PG_PORT || 5432,
-    ssl: process.env.PG_SSL === 'true' ? { rejectUnauthorized: false } : false
+    port: parseInt(process.env.PG_PORT) || 5432,
+    ssl: { rejectUnauthorized: false }
 };
 
 const pool = DB_TYPE === 'postgres' ? new Pool(pgConfig) : null;
