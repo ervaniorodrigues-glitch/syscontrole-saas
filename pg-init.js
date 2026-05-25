@@ -218,8 +218,12 @@ async function initPostgres(client) {
             dia INTEGER NOT NULL,
             status TEXT,
             comentario TEXT,
-            formatacao TEXT,
-            dataCriacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            isFolga INTEGER DEFAULT 0,
+            ocorrencia TEXT,
+            formatacao TEXT DEFAULT 'normal',
+            dataCriacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            dataAtualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(mesAno, funcionarioId, dia)
         )`,
 
         // 12. Configurações de NRs

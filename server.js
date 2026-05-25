@@ -4104,6 +4104,9 @@ app.post('/api/controle-presenca/marcar', async (req, res) => {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mesAno, funcionarioId, dia) DO UPDATE SET
                     status = excluded.status,
+                    funcionarioNome = excluded.funcionarioNome,
+                    funcionarioEmpresa = excluded.funcionarioEmpresa,
+                    funcionarioFuncao = excluded.funcionarioFuncao,
                     dataAtualizacao = CURRENT_TIMESTAMP`,
                 [mesAno, funcionarioId, funcionarioNome, funcionarioEmpresa, funcionarioFuncao, funcionarioSituacao, dia, status, req.body.formatacao || 'normal']
             );
