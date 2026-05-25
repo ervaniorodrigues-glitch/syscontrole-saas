@@ -411,13 +411,19 @@ router.get('/status/:tenantId', (req, res) => {
 
 // ============ CONFIGURAÇÃO E LOGIN DO GESTOR ============
 const CONFIG_FILE = path.join(__dirname, 'gestor-config.json');
-let gestorConfig = { email: 'ervanio.rodrigues@gmail.com', senha: 'Gestor@Senha01' };
+let gestorConfig = { 
+    email: process.env.GESTOR_EMAIL || 'ervanio.rodrigues@gmail.com', 
+    senha: process.env.GESTOR_SENHA || '@Senha01' 
+};
 
 function carregarConfig() {
     try {
         if (fs.existsSync(CONFIG_FILE)) {
             gestorConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
         }
+        // Variáveis de ambiente têm prioridade
+        if (process.env.GESTOR_EMAIL) gestorConfig.email = process.env.GESTOR_EMAIL;
+        if (process.env.GESTOR_SENHA) gestorConfig.senha = process.env.GESTOR_SENHA;
     } catch (e) {
         console.error('Erro ao carregar gestor-config.json:', e.message);
     }
