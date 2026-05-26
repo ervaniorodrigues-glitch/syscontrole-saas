@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: syscontrole-web
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: DB_TYPE
+        value: postgres
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
