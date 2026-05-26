@@ -537,23 +537,38 @@ router.post('/gestor/alterar-senha', verificarGestor, (req, res) => {
     res.json({ success: true, message: 'Senha alterada com sucesso!' });
 });
 
-router.get('/gestor/tenants', verificarGestor, (req, res) => {
-    masterDb.all(`
+router.get('/gestor/tenants', verificarGestor, async (req, res) => {
+    const { pgPool } = require('./saas-config');
+    
+    const sql = `
         SELECT t.id, t.nome_empresa, t.email, t.plano, t.ativo, t.data_cadastro, t.data_expiracao, t.data_pagamento,
                COUNT(u.id) as total_usuarios
         FROM tenants t
         LEFT JOIN usuarios_globais u ON u.tenant_id = t.id
-        GROUP BY t.id
+        GROUP BY t.id, t.nome_empresa, t.email, t.plano, t.ativo, t.data_cadastro, t.data_expiracao, t.data_pagamento
         ORDER BY t.data_cadastro DESC
-    `, [], (err, rows) => {
-        if (err) return res.status(500).json({ success: false, error: err.message });
+    `;
+
+    try {
+        let rows;
+        if (pgPool) {
+            const client = await pgPool.connect();
+            try {
+                const result = await client.query(sql);
+                rows = result.rows;
+            } finally {
+                client.release();
+            }
+        } else {
+            rows = await new Promise((resolve, reject) => {
+                masterDb.all(sql, [], (err, r) => err ? reject(err) : resolve(r));
+            });
+        }
 
         global.activeTenants = global.activeTenants || {};
         const lista = rows.map(r => {
-            // Considera online se houve atividade nos últimos 2 minutos
             const lastActive = global.activeTenants[r.id] || 0;
             const isOnline = (Date.now() - lastActive) < 120000;
-            
             return {
                 ...r,
                 online: isOnline,
@@ -563,61 +578,90 @@ router.get('/gestor/tenants', verificarGestor, (req, res) => {
         });
 
         res.json({ success: true, data: lista });
-    });
+    } catch (err) {
+        console.error('Erro ao buscar tenants:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // GESTOR — Liberar acesso pago para um tenant
-router.post('/gestor/liberar/:tenantId', verificarGestor, (req, res) => {
+router.post('/gestor/liberar/:tenantId', verificarGestor, async (req, res) => {
     const { tenantId } = req.params;
-    const { plano } = req.body; // 'mensal', 'anual', etc.
-
-    // Nova expiração: 30 dias a partir de hoje (ou pode ser null para plano permanente)
+    const { plano } = req.body;
+    const { pgPool } = require('./saas-config');
     const novaExpiracao = new Date();
     novaExpiracao.setDate(novaExpiracao.getDate() + 30);
 
-    masterDb.run(
-        `UPDATE tenants SET plano = ?, ativo = 1, data_expiracao = ?, data_pagamento = ? WHERE id = ?`,
-        [plano || 'pago', novaExpiracao.toISOString(), new Date().toISOString(), tenantId],
-        function(err) {
-            if (err) return res.status(500).json({ success: false, error: err.message });
-            if (this.changes === 0) return res.status(404).json({ success: false, message: 'Empresa não encontrada.' });
-
-            console.log(`✅ Acesso liberado para tenant: ${tenantId} — Plano: ${plano || 'pago'}`);
-            res.json({ success: true, message: 'Acesso liberado com sucesso!', nova_expiracao: novaExpiracao.toISOString() });
+    try {
+        if (pgPool) {
+            const client = await pgPool.connect();
+            try {
+                await client.query(`UPDATE tenants SET plano = $1, ativo = 1, data_expiracao = $2, data_pagamento = $3 WHERE id = $4`,
+                    [plano || 'pago', novaExpiracao.toISOString(), new Date().toISOString(), tenantId]);
+            } finally { client.release(); }
+        } else {
+            await new Promise((resolve, reject) => masterDb.run(
+                `UPDATE tenants SET plano = ?, ativo = 1, data_expiracao = ?, data_pagamento = ? WHERE id = ?`,
+                [plano || 'pago', novaExpiracao.toISOString(), new Date().toISOString(), tenantId],
+                (err) => err ? reject(err) : resolve()
+            ));
         }
-    );
+        res.json({ success: true, message: 'Acesso liberado com sucesso!', nova_expiracao: novaExpiracao.toISOString() });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // GESTOR — Bloquear/desativar tenant
-router.post('/gestor/bloquear/:tenantId', verificarGestor, (req, res) => {
-    masterDb.run(`UPDATE tenants SET ativo = 0 WHERE id = ?`, [req.params.tenantId], function(err) {
-        if (err) return res.status(500).json({ success: false, error: err.message });
+router.post('/gestor/bloquear/:tenantId', verificarGestor, async (req, res) => {
+    const { pgPool } = require('./saas-config');
+    try {
+        if (pgPool) {
+            const client = await pgPool.connect();
+            try { await client.query(`UPDATE tenants SET ativo = 0 WHERE id = $1`, [req.params.tenantId]); }
+            finally { client.release(); }
+        } else {
+            await new Promise((resolve, reject) => masterDb.run(`UPDATE tenants SET ativo = 0 WHERE id = ?`, [req.params.tenantId], (err) => err ? reject(err) : resolve()));
+        }
         res.json({ success: true, message: 'Empresa bloqueada.' });
-    });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // GESTOR — Estender trial de um tenant
-router.post('/gestor/estender/:tenantId', verificarGestor, (req, res) => {
+router.post('/gestor/estender/:tenantId', verificarGestor, async (req, res) => {
     const { dias } = req.body;
     const diasExtender = parseInt(dias) || 30;
+    const { pgPool } = require('./saas-config');
 
-    masterDb.get('SELECT data_expiracao FROM tenants WHERE id = ?', [req.params.tenantId], (err, row) => {
-        if (err || !row) return res.status(404).json({ success: false });
+    try {
+        let row;
+        if (pgPool) {
+            const client = await pgPool.connect();
+            try {
+                const r = await client.query('SELECT data_expiracao FROM tenants WHERE id = $1', [req.params.tenantId]);
+                row = r.rows[0];
+            } finally { client.release(); }
+        } else {
+            row = await new Promise((resolve, reject) => masterDb.get('SELECT data_expiracao FROM tenants WHERE id = ?', [req.params.tenantId], (err, r) => err ? reject(err) : resolve(r)));
+        }
 
-        const base = row.data_expiracao && new Date(row.data_expiracao) > new Date()
-            ? new Date(row.data_expiracao)
-            : new Date();
+        if (!row) return res.status(404).json({ success: false });
+        const base = row.data_expiracao && new Date(row.data_expiracao) > new Date() ? new Date(row.data_expiracao) : new Date();
         base.setDate(base.getDate() + diasExtender);
 
-        masterDb.run(
-            `UPDATE tenants SET data_expiracao = ?, data_pagamento = ?, ativo = 1 WHERE id = ?`,
-            [base.toISOString(), new Date().toISOString(), req.params.tenantId],
-            function(err) {
-                if (err) return res.status(500).json({ success: false, error: err.message });
-                res.json({ success: true, message: `Trial estendido por ${diasExtender} dias.`, nova_expiracao: base.toISOString() });
-            }
-        );
-    });
+        if (pgPool) {
+            const client = await pgPool.connect();
+            try { await client.query(`UPDATE tenants SET data_expiracao = $1, data_pagamento = $2, ativo = 1 WHERE id = $3`, [base.toISOString(), new Date().toISOString(), req.params.tenantId]); }
+            finally { client.release(); }
+        } else {
+            await new Promise((resolve, reject) => masterDb.run(`UPDATE tenants SET data_expiracao = ?, data_pagamento = ?, ativo = 1 WHERE id = ?`, [base.toISOString(), new Date().toISOString(), req.params.tenantId], (err) => err ? reject(err) : resolve()));
+        }
+        res.json({ success: true, message: `Trial estendido por ${diasExtender} dias.`, nova_expiracao: base.toISOString() });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // ============ SOLICITAÇÃO DE RENOVAÇÃO (enviada pelo usuário) ============
