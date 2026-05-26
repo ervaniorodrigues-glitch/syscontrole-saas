@@ -5084,6 +5084,47 @@ app.post('/api/backup/restaurar', async (req, res) => {
             restaurados.configuracoesNR = backup.dados.configuracoesNR.length;
         }
         
+        // Restaurar cursos habilitados (configuração de colunas visíveis)
+        if (backup.dados.cursosHabilitados && backup.dados.cursosHabilitados.length > 0) {
+            await db.run('DELETE FROM HABILITAR_CURSOS');
+            if (DB_TYPE === 'sqlite') {
+                try { await db.run("DELETE FROM sqlite_sequence WHERE name='HABILITAR_CURSOS'"); } catch(e) {}
+            }
+            for (const curso of backup.dados.cursosHabilitados) {
+                try {
+                    const sql = DB_TYPE === 'sqlite'
+                        ? `INSERT INTO HABILITAR_CURSOS (curso, habilitado) VALUES (?, ?)`
+                        : `INSERT INTO HABILITAR_CURSOS (curso, habilitado) VALUES ($1, $2)`;
+                    await db.run(sql, [curso.curso, curso.habilitado]);
+                } catch (err) {
+                    erros.push('Curso ' + curso.curso + ': ' + err.message);
+                }
+            }
+            restaurados.cursosHabilitados = backup.dados.cursosHabilitados.length;
+            console.log(`✅ ${backup.dados.cursosHabilitados.length} cursos habilitados restaurados`);
+        }
+
+        // Restaurar configuração de relatório (título, rodapé, logo, técnico, itens EPI)
+        if (backup.dados.configuracao && Object.keys(backup.dados.configuracao).length > 0) {
+            try {
+                const cfg = backup.dados.configuracao;
+                const sql = DB_TYPE === 'sqlite'
+                    ? `UPDATE configuracao_relatorio SET titulo = ?, rodape = ?, logo = ?, tecnico_seguranca = ?, epi_itens_padrao = ? WHERE id = 1`
+                    : `UPDATE configuracao_relatorio SET titulo = $1, rodape = $2, logo = $3, tecnico_seguranca = $4, epi_itens_padrao = $5 WHERE id = 1`;
+                await db.run(sql, [
+                    cfg.titulo || 'Relatório de Cursos',
+                    cfg.rodape || 'SSMA',
+                    cfg.logo || '/Logo-Hoss.jpg',
+                    cfg.tecnico_seguranca || '',
+                    cfg.epi_itens_padrao || '[]'
+                ]);
+                restaurados.configuracao = true;
+                console.log('✅ Configuração de relatório restaurada');
+            } catch (err) {
+                erros.push('Configuração relatório: ' + err.message);
+            }
+        }
+
         res.json({ success: true, message: 'Backup restaurado com sucesso', restaurados, erros: erros.length > 0 ? erros : undefined });
         await registrarLog(req, 'Restaurar Backup', `Restaurou backup completo (${restaurados.funcionarios} funcionários, ${restaurados.fornecedores} fornecedores, ${restaurados.documentacao} documentações)`);
     } catch (err) {

@@ -1,8 +1,9 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const { AsyncLocalStorage } = require('async_hooks');
-const { TENANTS_DIR, masterDb, globalDb } = require('./saas-config');
+const { TENANTS_DIR, masterDb, globalDb, pgPool } = require('./saas-config');
 const { initDatabase } = require('./db-init');
+const { getPgTenantDb, initTenantSchema } = require('./pg-tenant-utils');
 
 const asyncLocalStorage = new AsyncLocalStorage();
 
@@ -15,25 +16,37 @@ function getTenantDb(tenantId) {
             return resolve(tenantDbConnections[tenantId]);
         }
 
-        masterDb.get('SELECT * FROM tenants WHERE id = ? AND ativo = 1', [tenantId], (err, row) => {
+        masterDb.get('SELECT * FROM tenants WHERE id = ? AND ativo = 1', [tenantId], async (err, row) => {
             if (err) return reject(new Error('Erro ao validar Tenant no MasterDB'));
             if (!row) return reject(new Error('Tenant inválido ou inativo'));
 
-            const dbPath = path.join(TENANTS_DIR, `${tenantId}.db`);
-            const dbSqlite = new sqlite3.Database(dbPath, (err) => {
-                if (err) return reject(new Error(`Erro ao conectar no banco do Tenant ${tenantId}`));
-
-                // 🔥 AUTO-MIGRATE: Garante que tabelas/colunas novas (como IP e Navegador) existam imediatamente!
+            if (pgPool) {
+                // Modo PostgreSQL
                 try {
-                    initDatabase(dbSqlite, globalDb, true); // Passa true para isTenant
-                } catch (migrateErr) {
-                    console.error(`⚠️ Falha na auto-migração para o Tenant ${tenantId}:`, migrateErr.message);
+                    const dbContext = getPgTenantDb(pgPool, tenantId);
+                    tenantDbConnections[tenantId] = dbContext;
+                    return resolve(dbContext);
+                } catch (e) {
+                    return reject(new Error(`Erro ao configurar conexão PG do Tenant ${tenantId}: ` + e.message));
                 }
+            } else {
+                // Modo SQLite
+                const dbPath = path.join(TENANTS_DIR, `${tenantId}.db`);
+                const dbSqlite = new sqlite3.Database(dbPath, (err) => {
+                    if (err) return reject(new Error(`Erro ao conectar no banco do Tenant ${tenantId}`));
 
-                const dbContext = criarAbstracaoDB(dbSqlite);
-                tenantDbConnections[tenantId] = dbContext;
-                resolve(dbContext);
-            });
+                    // 🔥 AUTO-MIGRATE: Garante que tabelas/colunas novas (como IP e Navegador) existam imediatamente!
+                    try {
+                        initDatabase(dbSqlite, globalDb, true); // Passa true para isTenant
+                    } catch (migrateErr) {
+                        console.error(`⚠️ Falha na auto-migração para o Tenant ${tenantId}:`, migrateErr.message);
+                    }
+
+                    const dbContext = criarAbstracaoDB(dbSqlite);
+                    tenantDbConnections[tenantId] = dbContext;
+                    resolve(dbContext);
+                });
+            }
         });
     });
 }
