@@ -292,6 +292,8 @@ function copiarConfiguracoesDeModelo(modelDbPath, targetDb) {
 // ============ CADASTRO DE NOVA EMPRESA (TRIAL 30 DIAS) ============
 router.post('/registrar', async (req, res) => {
     const { nome_empresa, email, senha } = req.body;
+    const { pgPool } = require('./saas-config');
+    const { initTenantSchema, getPgTenantDb } = require('./pg-tenant-utils');
 
     if (!nome_empresa || !email || !senha) {
         return res.status(400).json({ success: false, message: 'Preencha todos os campos.' });
@@ -309,81 +311,133 @@ router.post('/registrar', async (req, res) => {
         const dataExpiracao = new Date();
         dataExpiracao.setDate(dataExpiracao.getDate() + 30);
 
-        masterDb.serialize(() => {
-            masterDb.run('BEGIN TRANSACTION');
+        try {
+            if (pgPool) {
+                // Fluxo PostgreSQL
+                const client = await pgPool.connect();
+                try {
+                    await client.query('BEGIN');
+                    await client.query(
+                        `INSERT INTO tenants (id, nome_empresa, email, db_path, plano, ativo, data_expiracao) VALUES ($1, $2, $3, $4, 'trial', 1, $5)`,
+                        [tenantId, nome_empresa, email, tenantId, dataExpiracao.toISOString()]
+                    );
+                    await client.query(
+                        `INSERT INTO usuarios_globais (tenant_id, login, senha, nome, tipo) VALUES ($1, $2, $3, $4, 'master')`,
+                        [tenantId, email, senha, nome_empresa]
+                    );
+                    await client.query('COMMIT');
+                    
+                    // Inicializar schema do novo tenant
+                    await initTenantSchema(pgPool, tenantId);
+                    
+                    // Inserir usuário master no tenant e copiar configurações (simulado aqui)
+                    const pgTenantDb = getPgTenantDb(pgPool, tenantId);
+                    await pgTenantDb.run(`CREATE TABLE IF NOT EXISTS USUARIOS_TENANT (
+                        id SERIAL PRIMARY KEY,
+                        login TEXT NOT NULL UNIQUE, senha TEXT NOT NULL,
+                        nome TEXT NOT NULL, tipo TEXT DEFAULT 'comum', ativo INTEGER DEFAULT 1
+                    )`);
+                    await pgTenantDb.run(
+                        `INSERT INTO USUARIOS_TENANT (login, senha, nome, tipo, ativo) VALUES (?, ?, ?, 'master', 1) ON CONFLICT(login) DO NOTHING`,
+                        [email, senha, nome_empresa]
+                    );
 
-            masterDb.run(
-                `INSERT INTO tenants (id, nome_empresa, email, db_path, plano, ativo, data_expiracao) VALUES (?, ?, ?, ?, 'trial', 1, ?)`,
-                [tenantId, nome_empresa, email, dbPath, dataExpiracao.toISOString()],
-                (err) => {
-                    if (err) {
-                        masterDb.run('ROLLBACK');
-                        return res.status(500).json({ success: false, message: 'Erro ao criar empresa.' });
-                    }
+                    console.log(`✅ Novo tenant PG criado: ${tenantId} (${email}) - Trial até ${dataExpiracao.toLocaleDateString('pt-BR')}`);
+                    return res.json({
+                        success: true,
+                        message: 'Empresa cadastrada! Você tem 30 dias de acesso gratuito.',
+                        tenant_id: tenantId,
+                        expiracao: dataExpiracao.toISOString()
+                    });
+                } catch (pgErr) {
+                    await client.query('ROLLBACK');
+                    console.error('Erro no cadastro PG:', pgErr);
+                    return res.status(500).json({ success: false, message: 'Erro ao criar empresa no banco de dados.' });
+                } finally {
+                    client.release();
+                }
+            } else {
+                // Fluxo SQLite (Legado)
+                masterDb.serialize(() => {
+                    masterDb.run('BEGIN TRANSACTION');
 
                     masterDb.run(
-                        `INSERT INTO usuarios_globais (tenant_id, login, senha, nome, tipo) VALUES (?, ?, ?, ?, 'master')`,
-                        [tenantId, email, senha, nome_empresa],
+                        `INSERT INTO tenants (id, nome_empresa, email, db_path, plano, ativo, data_expiracao) VALUES (?, ?, ?, ?, 'trial', 1, ?)`,
+                        [tenantId, nome_empresa, email, dbPath, dataExpiracao.toISOString()],
                         (err) => {
                             if (err) {
                                 masterDb.run('ROLLBACK');
-                                return res.status(500).json({ success: false, message: 'Erro ao criar usuário.' });
+                                return res.status(500).json({ success: false, message: 'Erro ao criar empresa.' });
                             }
 
-                            // Criar banco zerado para o novo tenant (sem herdar dados de ninguém)
-                            const sqlite3 = require('sqlite3').verbose();
-                            const novoDb = new sqlite3.Database(dbPath);
-                            
-                            (async () => {
-                                try {
-                                    // 1. Inicializar tabelas e índices
-                                    await initDatabasePromise(novoDb, globalDb, true);
+                            masterDb.run(
+                                `INSERT INTO usuarios_globais (tenant_id, login, senha, nome, tipo) VALUES (?, ?, ?, ?, 'master')`,
+                                [tenantId, email, senha, nome_empresa],
+                                (err) => {
+                                    if (err) {
+                                        masterDb.run('ROLLBACK');
+                                        return res.status(500).json({ success: false, message: 'Erro ao criar usuário.' });
+                                    }
+
+                                    // Criar banco zerado para o novo tenant (sem herdar dados de ninguém)
+                                    const sqlite3 = require('sqlite3').verbose();
+                                    const novoDb = new sqlite3.Database(dbPath);
                                     
-                                    // 2. Criar tabela de usuários do tenant (obrigatória para login) e inserir usuário master
-                                    await new Promise((resolve, reject) => {
-                                        novoDb.serialize(() => {
-                                            novoDb.run(`CREATE TABLE IF NOT EXISTS USUARIOS_TENANT (
-                                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                                login TEXT NOT NULL UNIQUE, senha TEXT NOT NULL,
-                                                nome TEXT NOT NULL, tipo TEXT DEFAULT 'comum', ativo INTEGER DEFAULT 1
-                                            )`);
-                                            novoDb.run(
-                                                `INSERT OR IGNORE INTO USUARIOS_TENANT (id, login, senha, nome, tipo, ativo) VALUES (1, ?, ?, ?, 'master', 1)`,
-                                                [email, senha, nome_empresa]
-                                            );
-                                            novoDb.get('SELECT 1', (err) => err ? reject(err) : resolve());
-                                        });
-                                    });
+                                    (async () => {
+                                        try {
+                                            // 1. Inicializar tabelas e índices
+                                            await initDatabasePromise(novoDb, globalDb, true);
+                                            
+                                            // 2. Criar tabela de usuários do tenant (obrigatória para login) e inserir usuário master
+                                            await new Promise((resolve, reject) => {
+                                                novoDb.serialize(() => {
+                                                    novoDb.run(`CREATE TABLE IF NOT EXISTS USUARIOS_TENANT (
+                                                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                        login TEXT NOT NULL UNIQUE, senha TEXT NOT NULL,
+                                                        nome TEXT NOT NULL, tipo TEXT DEFAULT 'comum', ativo INTEGER DEFAULT 1
+                                                    )`);
+                                                    novoDb.run(
+                                                        `INSERT OR IGNORE INTO USUARIOS_TENANT (id, login, senha, nome, tipo, ativo) VALUES (1, ?, ?, ?, 'master', 1)`,
+                                                        [email, senha, nome_empresa]
+                                                    );
+                                                    novoDb.get('SELECT 1', (err) => err ? reject(err) : resolve());
+                                                });
+                                            });
 
-                                    // 3. Copiar configurações do banco modelo (ervanio-1234.db) se existir
-                                    const modelDbPath = path.join(TENANTS_DIR, 'ervanio-1234.db');
-                                    await copiarConfiguracoesDeModelo(modelDbPath, novoDb);
+                                            // 3. Copiar configurações do banco modelo (ervanio-1234.db) se existir
+                                            const modelDbPath = path.join(TENANTS_DIR, 'ervanio-1234.db');
+                                            await copiarConfiguracoesDeModelo(modelDbPath, novoDb);
 
-                                    console.log(`[REGISTRAR] Banco de dados do tenant ${tenantId} totalmente inicializado e configurado.`);
-                                } catch (initErr) {
-                                    console.error(`❌ Erro ao inicializar banco do tenant ${tenantId}:`, initErr);
-                                } finally {
-                                    novoDb.close((err) => {
-                                        if (err) console.error(`Erro ao fechar banco do tenant ${tenantId}:`, err.message);
-                                        else console.log(`[REGISTRAR] Banco do tenant ${tenantId} fechado com sucesso.`);
+                                            console.log(`[REGISTRAR] Banco de dados do tenant ${tenantId} totalmente inicializado e configurado.`);
+                                        } catch (initErr) {
+                                            console.error(`❌ Erro ao inicializar banco do tenant ${tenantId}:`, initErr);
+                                        } finally {
+                                            novoDb.close((err) => {
+                                                if (err) console.error(`Erro ao fechar banco do tenant ${tenantId}:`, err.message);
+                                                else console.log(`[REGISTRAR] Banco do tenant ${tenantId} fechado com sucesso.`);
+                                            });
+                                        }
+                                    })();
+
+                                    masterDb.run('COMMIT');
+                                    console.log(`✅ Novo tenant criado: ${tenantId} (${email}) - Trial até ${dataExpiracao.toLocaleDateString('pt-BR')}`);
+
+                                    return res.json({
+                                        success: true,
+                                        message: 'Empresa cadastrada! Você tem 30 dias de acesso gratuito.',
+                                        tenant_id: tenantId,
+                                        expiracao: dataExpiracao.toISOString()
                                     });
                                 }
-                            })();
-
-                            masterDb.run('COMMIT');
-                            console.log(`✅ Novo tenant criado: ${tenantId} (${email}) - Trial até ${dataExpiracao.toLocaleDateString('pt-BR')}`);
-
-                            res.json({
-                                success: true,
-                                message: 'Empresa cadastrada! Você tem 30 dias de acesso gratuito.',
-                                tenant_id: tenantId,
-                                expiracao: dataExpiracao.toISOString()
-                            });
+                            );
                         }
                     );
-                }
-            );
-        });
+                });
+            }
+        } catch (e) {
+            console.error('Erro na rota registrar:', e);
+            return res.status(500).json({ success: false, message: 'Erro no servidor.' });
+        }
     });
 });
 

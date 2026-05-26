@@ -29,24 +29,12 @@ process.on('unhandledRejection', (reason, promise) => {
 
 
 // ============ CONFIGURAÇÃO DE AMBIENTE / BANCO ============
-const DB_TYPE = process.env.DB_TYPE || 'sqlite'; // 'sqlite' ou 'postgres'
-console.log(`🔌 Tipo de Banco de Dados Detectado: ${DB_TYPE.toUpperCase()}`);
+const { pgPool, globalDb } = require('./saas-config');
+const DB_TYPE = pgPool ? 'postgres' : 'sqlite';
+console.log(`🔌 Tipo de Banco de Dados Global Detectado: ${DB_TYPE.toUpperCase()}`);
 
-// Configurações do PostgreSQL (SaaS / Web)
-const pgConfig = process.env.DATABASE_URL ? {
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
-} : {
-    user: process.env.PG_USER || 'postgres',
-    host: process.env.PG_HOST || 'localhost',
-    database: process.env.PG_DATABASE || 'syscontrole',
-    password: process.env.PG_PASSWORD || 'sua_senha_aqui',
-    port: parseInt(process.env.PG_PORT) || 5432,
-    ssl: { rejectUnauthorized: false }
-};
-
-const pool = DB_TYPE === 'postgres' ? new Pool(pgConfig) : null;
-const dbSqlite = DB_TYPE === 'sqlite' ? new sqlite3.Database(path.join(__dirname, 'syscontrole.db')) : null;
+const pool = pgPool;
+const dbSqlite = DB_TYPE === 'sqlite' ? globalDb : null;
 
 // Camada de Abstração para queries (Compatível com Callbacks e Promises)
 const db = {
@@ -4909,7 +4897,7 @@ app.post('/api/backup/restaurar', async (req, res) => {
         
         console.log('✅ Tabelas limpas');
         
-        // Colunas válidas da tabela SSMA (exclui colunas calculadas como temFoto)
+        // Conjuntos de Colunas Válidas para filtro na restauração
         const COLUNAS_SSMA_VALIDAS = new Set([
             'id', 'Nome', 'Empresa', 'Funcao', 'Celular', 'CPF', 'DataEmissao', 'Vencimento', 'Anotacoes', 'Situacao', 'Ambientacao',
             'Nr06_DataEmissao', 'Nr06_Vencimento', 'Nr06_Status', 'Nr06_NumControle', 'Nr06_AnoControle', 'Nr06_Validade2Anos', 'Nr06_Validade8Meses',
@@ -4926,14 +4914,27 @@ app.post('/api/backup/restaurar', async (req, res) => {
             'Foto', 'Cadastro', 'DataInativacao', 'IgnorarInvalidez'
         ]);
 
+        const COLUNAS_FORNECEDOR_VALIDAS = new Set(['id', 'Empresa', 'CNPJ', 'Telefone', 'Celular', 'Contato', 'Observacao', 'DataCadastro', 'DataInativacao', 'Situacao']);
+        const COLUNAS_DOCUMENTACAO_VALIDAS = new Set(['id', 'empresa', 'cnpj', 'pgr_emissao', 'pgr_vencimento', 'pgr_status', 'pgr_dias_corridos', 'pgr_dias_vencer', 'pcmso_emissao', 'pcmso_vencimento', 'pcmso_status', 'pcmso_dias_corridos', 'pcmso_dias_vencer', 'ativo', 'DataCadastro', 'DataAlteracao']);
+        const COLUNAS_PRESENCA_VALIDAS = new Set(['id', 'mesAno', 'funcionarioId', 'funcionarioNome', 'funcionarioEmpresa', 'funcionarioFuncao', 'funcionarioSituacao', 'dia', 'status', 'isFolga', 'comentario', 'ocorrencia', 'formatacao', 'dataAtualizacao']);
+        const COLUNAS_HISTORICO_PRESENCA_VALIDAS = new Set(['id', 'mesAno', 'funcionarioId', 'funcionarioNome', 'funcionarioEmpresa', 'funcionarioFuncao', 'funcionarioSituacao', 'dadosPresenca', 'comentarios', 'dataCriacao']);
+        const COLUNAS_MUDANCA_FUNCAO_VALIDAS = new Set(['id', 'mesAno', 'funcionarioId', 'funcionarioNome', 'funcaoAnterior', 'funcaoNova', 'diaInicio', 'anotacoes', 'dataCriacao']);
+        const COLUNAS_EMPRESAS_OCULTAS_VALIDAS = new Set(['id', 'empresaOculta', 'dataCriacao']);
+        const COLUNAS_AUDIT_LOG_VALIDAS = new Set(['id', 'usuario', 'acao', 'detalhes', 'ip', 'navegador', 'dataHora']);
+
+        const filtrarObjeto = (obj, validSet) => {
+            const result = {};
+            for (const [k, v] of Object.entries(obj)) {
+                if (validSet.has(k)) result[k] = v;
+            }
+            return result;
+        };
+
         // Restaurar funcionários
         if (backup.dados.funcionarios && backup.dados.funcionarios.length > 0) {
             for (const f of backup.dados.funcionarios) {
                 try {
-                    const funcionario = {};
-                    for (const [k, v] of Object.entries(f)) {
-                        if (COLUNAS_SSMA_VALIDAS.has(k)) funcionario[k] = v;
-                    }
+                    const funcionario = filtrarObjeto(f, COLUNAS_SSMA_VALIDAS);
 
                     // Converter foto de base64/Buffer para Buffer binário
                     if (funcionario.Foto) {
@@ -4945,6 +4946,7 @@ app.post('/api/backup/restaurar', async (req, res) => {
                     }
 
                     const colunas = Object.keys(funcionario);
+                    if (colunas.length === 0) continue;
                     const valores = Object.values(funcionario);
                     const placeholders = colunas.map(() => '?').join(', ');
                     
@@ -4960,8 +4962,10 @@ app.post('/api/backup/restaurar', async (req, res) => {
         if (backup.dados.fornecedores && backup.dados.fornecedores.length > 0) {
             for (const f of backup.dados.fornecedores) {
                 try {
-                    const colunas = Object.keys(f);
-                    const valores = Object.values(f);
+                    const obj = filtrarObjeto(f, COLUNAS_FORNECEDOR_VALIDAS);
+                    const colunas = Object.keys(obj);
+                    if (colunas.length === 0) continue;
+                    const valores = Object.values(obj);
                     const placeholders = colunas.map(() => '?').join(', ');
                     await db.run(`INSERT INTO FORNECEDOR (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
                     restaurados.fornecedores++;
@@ -4975,8 +4979,10 @@ app.post('/api/backup/restaurar', async (req, res) => {
         if (backup.dados.documentacao && backup.dados.documentacao.length > 0) {
             for (const d of backup.dados.documentacao) {
                 try {
-                    const colunas = Object.keys(d);
-                    const valores = Object.values(d);
+                    const obj = filtrarObjeto(d, COLUNAS_DOCUMENTACAO_VALIDAS);
+                    const colunas = Object.keys(obj);
+                    if (colunas.length === 0) continue;
+                    const valores = Object.values(obj);
                     const placeholders = colunas.map(() => '?').join(', ');
                     await db.run(`INSERT INTO DOCUMENTACAO (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
                     restaurados.documentacao++;
@@ -4998,8 +5004,10 @@ app.post('/api/backup/restaurar', async (req, res) => {
             if (backup.dados.presencaBanco && backup.dados.presencaBanco.length > 0) {
                 await db.run('DELETE FROM PRESENCA');
                 for (const p of backup.dados.presencaBanco) {
-                    const colunas = Object.keys(p);
-                    const valores = Object.values(p);
+                    const obj = filtrarObjeto(p, COLUNAS_PRESENCA_VALIDAS);
+                    const colunas = Object.keys(obj);
+                    if (colunas.length === 0) continue;
+                    const valores = Object.values(obj);
                     const placeholders = colunas.map(() => '?').join(', ');
                     await db.run(`INSERT INTO PRESENCA (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
                 }
@@ -5011,8 +5019,10 @@ app.post('/api/backup/restaurar', async (req, res) => {
         if (backup.dados.historicoPresenca && backup.dados.historicoPresenca.length > 0) {
             await db.run('DELETE FROM HISTORICO_PRESENCA');
             for (const h of backup.dados.historicoPresenca) {
-                const colunas = Object.keys(h);
-                const valores = Object.values(h);
+                const obj = filtrarObjeto(h, COLUNAS_HISTORICO_PRESENCA_VALIDAS);
+                const colunas = Object.keys(obj);
+                if (colunas.length === 0) continue;
+                const valores = Object.values(obj);
                 const placeholders = colunas.map(() => '?').join(', ');
                 await db.run(`INSERT INTO HISTORICO_PRESENCA (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
             }
@@ -5022,8 +5032,10 @@ app.post('/api/backup/restaurar', async (req, res) => {
         if (backup.dados.mudancasFuncao && backup.dados.mudancasFuncao.length > 0) {
             await db.run('DELETE FROM MUDANCA_FUNCAO_PRESENCA');
             for (const m of backup.dados.mudancasFuncao) {
-                const colunas = Object.keys(m);
-                const valores = Object.values(m);
+                const obj = filtrarObjeto(m, COLUNAS_MUDANCA_FUNCAO_VALIDAS);
+                const colunas = Object.keys(obj);
+                if (colunas.length === 0) continue;
+                const valores = Object.values(obj);
                 const placeholders = colunas.map(() => '?').join(', ');
                 await db.run(`INSERT INTO MUDANCA_FUNCAO_PRESENCA (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
             }
@@ -5033,8 +5045,10 @@ app.post('/api/backup/restaurar', async (req, res) => {
         if (backup.dados.empresasOcultas && backup.dados.empresasOcultas.length > 0) {
             await db.run('DELETE FROM EMPRESAS_OCULTAS');
             for (const e of backup.dados.empresasOcultas) {
-                const colunas = Object.keys(e);
-                const valores = Object.values(e);
+                const obj = filtrarObjeto(e, COLUNAS_EMPRESAS_OCULTAS_VALIDAS);
+                const colunas = Object.keys(obj);
+                if (colunas.length === 0) continue;
+                const valores = Object.values(obj);
                 const placeholders = colunas.map(() => '?').join(', ');
                 await db.run(`INSERT INTO EMPRESAS_OCULTAS (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
             }
@@ -5044,8 +5058,10 @@ app.post('/api/backup/restaurar', async (req, res) => {
         if (backup.dados.auditLog && backup.dados.auditLog.length > 0) {
             await db.run('DELETE FROM AUDIT_LOG');
             for (const a of backup.dados.auditLog) {
-                const colunas = Object.keys(a);
-                const valores = Object.values(a);
+                const obj = filtrarObjeto(a, COLUNAS_AUDIT_LOG_VALIDAS);
+                const colunas = Object.keys(obj);
+                if (colunas.length === 0) continue;
+                const valores = Object.values(obj);
                 const placeholders = colunas.map(() => '?').join(', ');
                 await db.run(`INSERT INTO AUDIT_LOG (${colunas.join(', ')}) VALUES (${placeholders})`, valores);
             }
