@@ -497,11 +497,16 @@ carregarConfig();
 function verificarGestor(req, res, next) {
     const senha = req.headers['x-gestor-senha'];
     const email = req.headers['x-gestor-email'];
-    
-    // Recarregar config para garantir que pegou o reset se houver
+
     carregarConfig();
 
-    if (senha !== gestorConfig.senha || email !== gestorConfig.email) {
+    // Aceita senha com ou sem @ no início (para compatibilidade com Render)
+    const senhaConfig = gestorConfig.senha;
+    const senhaMatch = senha === senhaConfig || 
+                       senha === senhaConfig.replace(/^@/, '') ||
+                       '@' + senha === senhaConfig;
+
+    if (!senhaMatch || email !== gestorConfig.email) {
         return res.status(401).json({ success: false, message: 'Acesso negado.' });
     }
     next();
