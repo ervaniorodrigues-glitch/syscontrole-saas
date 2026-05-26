@@ -472,12 +472,15 @@ let gestorConfig = {
 
 function carregarConfig() {
     try {
-        if (fs.existsSync(CONFIG_FILE)) {
-            gestorConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-        }
-        // Variáveis de ambiente têm prioridade
+        // Variáveis de ambiente SEMPRE têm prioridade
         if (process.env.GESTOR_EMAIL) gestorConfig.email = process.env.GESTOR_EMAIL;
         if (process.env.GESTOR_SENHA) gestorConfig.senha = process.env.GESTOR_SENHA;
+        
+        // Só lê o arquivo se NÃO houver variáveis de ambiente
+        if (!process.env.GESTOR_EMAIL && !process.env.GESTOR_SENHA && fs.existsSync(CONFIG_FILE)) {
+            const fileConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+            gestorConfig = { ...fileConfig };
+        }
     } catch (e) {
         console.error('Erro ao carregar gestor-config.json:', e.message);
     }
