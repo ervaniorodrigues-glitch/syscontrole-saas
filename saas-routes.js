@@ -467,7 +467,7 @@ router.get('/status/:tenantId', (req, res) => {
 const CONFIG_FILE = path.join(__dirname, 'gestor-config.json');
 let gestorConfig = { 
     email: process.env.GESTOR_EMAIL || 'ervanio.rodrigues@gmail.com', 
-    senha: process.env.GESTOR_SENHA || '@Senha01' 
+    senha: process.env.GESTOR_SENHA || 'aSenha01' 
 };
 
 function carregarConfig() {
