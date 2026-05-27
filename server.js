@@ -5383,6 +5383,27 @@ app.listen(PORT, '0.0.0.0', async () => {
     // VERIFICAR SE MUDOU DE MÊS AO INICIAR O SERVIDOR
     console.log(`\n🔍 Verificando mudança de mês...`);
     await verificarResetMes();
+
+    // INICIALIZAR SCHEMAS DE TODOS OS TENANTS NO POSTGRESQL
+    const { pgPool } = require('./saas-config');
+    if (pgPool) {
+        try {
+            const { initTenantSchema } = require('./pg-tenant-utils');
+            const { masterDb } = require('./saas-config');
+            const tenants = await masterDb.all(`SELECT id FROM tenants WHERE ativo = 1`);
+            console.log(`🏢 Inicializando schemas para ${tenants.length} tenant(s)...`);
+            for (const tenant of tenants) {
+                try {
+                    await initTenantSchema(pgPool, tenant.id);
+                    console.log(`✅ Schema inicializado: ${tenant.id}`);
+                } catch (e) {
+                    console.error(`⚠️ Erro ao inicializar schema ${tenant.id}:`, e.message);
+                }
+            }
+        } catch (e) {
+            console.error('⚠️ Erro ao inicializar schemas dos tenants:', e.message);
+        }
+    }
 });
 
 // Graceful shutdown consolidado
