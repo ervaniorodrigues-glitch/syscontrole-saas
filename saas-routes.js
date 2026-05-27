@@ -32,59 +32,79 @@ router.post('/login', (req, res) => {
 
     // ---- FLUXO 2: Usuário interno (funcionário liberado pelo master) ----
     if (tenant_code) {
-        masterDb.get(`SELECT * FROM tenants WHERE (LOWER(id) = LOWER(?) OR LOWER(email) = LOWER(?)) AND ativo = 1`, [tenant_code, tenant_code], (err, tenant) => {
+        masterDb.get(`SELECT * FROM tenants WHERE (LOWER(id) = LOWER(?) OR LOWER(email) = LOWER(?)) AND ativo = 1`, [tenant_code, tenant_code], async (err, tenant) => {
             if (err || !tenant) {
                 return res.status(401).json({ success: false, message: 'Código da empresa inválido ou empresa inativa.' });
             }
 
-            const sqlite3 = require('sqlite3').verbose();
-            const dbPath = path.isAbsolute(tenant.db_path) ? tenant.db_path : path.join(__dirname, tenant.db_path);
-            const tenantDb = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, (dbErr) => {
-                if (dbErr) {
-                    return res.status(500).json({ success: false, message: 'Erro ao acessar banco da empresa.' });
+            try {
+                const { pgPool } = require('./saas-config');
+                let user;
+
+                if (pgPool) {
+                    // Modo PostgreSQL — usar schema do tenant
+                    const { getPgTenantDb } = require('./pg-tenant-utils');
+                    const tenantDb = getPgTenantDb(pgPool, tenant.id);
+                    user = await tenantDb.get(
+                        `SELECT * FROM USUARIOS_TENANT WHERE LOWER(login) = LOWER(?) AND senha = ? AND ativo = 1`,
+                        [login, senha]
+                    );
+                } else {
+                    // Modo SQLite
+                    const sqlite3 = require('sqlite3').verbose();
+                    const dbPath = path.isAbsolute(tenant.db_path) ? tenant.db_path : path.join(__dirname, tenant.db_path);
+                    user = await new Promise((resolve, reject) => {
+                        const tenantDb = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, (dbErr) => {
+                            if (dbErr) return reject(dbErr);
+                            tenantDb.get(
+                                `SELECT * FROM USUARIOS_TENANT WHERE LOWER(login) = LOWER(?) AND senha = ? AND ativo = 1`,
+                                [login, senha],
+                                (queryErr, row) => {
+                                    tenantDb.close();
+                                    if (queryErr) return reject(queryErr);
+                                    resolve(row);
+                                }
+                            );
+                        });
+                    });
                 }
 
-                tenantDb.get(
-                    `SELECT * FROM USUARIOS_TENANT WHERE LOWER(login) = LOWER(?) AND senha = ? AND ativo = 1`,
-                    [login, senha],
-                    (queryErr, user) => {
-                        tenantDb.close();
-                        if (queryErr) {
-                            console.error('Erro login interno:', queryErr);
-                            return res.status(500).json({ success: false, message: 'Erro ao autenticar.' });
-                        }
-                        if (!user) {
-                            return res.status(401).json({ success: false, message: 'Login ou senha incorretos.' });
-                        }
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'Login ou senha incorretos.' });
+                }
 
-                        // ⭐ BLOQUEIO RÍGIDO (SESSÃO ÚNICA): Verificar se já existe sessão ativa
-                        const ipAtual = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-                        verificarSessaoAtiva(login, tenant.id, ipAtual, (sessErr, sessao) => {
-                            if (sessao) {
-                                console.log(`🚫 Tentativa de login duplicado bloqueada (Tenant Flow 2): ${login} em ${tenant.id}`);
-                                return res.status(401).json({ 
-                                    success: false, 
-                                    code: 'CONCURRENT_SESSION',
-                                    message: 'ESTA CONTA JÁ POSSUI UMA SESSÃO ATIVA. Encerre o outro acesso.' 
-                                });
-                            }
+                // Normalizar campos (PG retorna lowercase)
+                const userId = user.id;
+                const userLogin = user.login;
+                const userNome = user.nome || user.Nome || user.NOME;
+                const userTipo = user.tipo || user.Tipo;
 
-                            return res.json({
-                                success: true,
-                                user: {
-                                    id: user.id,
-                                    tenant_id: tenant.id,
-                                    login: user.login,
-                                    nome: user.nome,
-                                    tipo: user.tipo,
-                                    empresa: tenant.nome_empresa,
-                                    plano: tenant.plano
-                                }
-                            });
+                const ipAtual = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+                verificarSessaoAtiva(login, tenant.id, ipAtual, (sessErr, sessao) => {
+                    if (sessao) {
+                        return res.status(401).json({
+                            success: false,
+                            code: 'CONCURRENT_SESSION',
+                            message: 'ESTA CONTA JÁ POSSUI UMA SESSÃO ATIVA. Encerre o outro acesso.'
                         });
                     }
-                );
-            });
+                    return res.json({
+                        success: true,
+                        user: {
+                            id: userId,
+                            tenant_id: tenant.id,
+                            login: userLogin,
+                            nome: userNome,
+                            tipo: userTipo,
+                            empresa: tenant.nome_empresa || tenant.nome_empresa,
+                            plano: tenant.plano
+                        }
+                    });
+                });
+            } catch (e) {
+                console.error('Erro login interno (Flow 2):', e.message);
+                return res.status(500).json({ success: false, message: 'Erro ao autenticar.' });
+            }
         });
         return;
     }

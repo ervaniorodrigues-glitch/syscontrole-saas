@@ -752,8 +752,8 @@ app.get('/api/usuarios', (req, res) => {
             id: u.id,
             login: u.login,
             senha: u.senha,
-            nome: u.nome,
-            tipo: u.tipo,
+            nome: u.nome || u.Nome || u.NOME || '',
+            tipo: u.tipo || u.Tipo || '',
             ativo: u.ativo === 1 || u.ativo === true || u.ativo === 'true'
         }));
         
