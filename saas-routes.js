@@ -6,6 +6,24 @@ const { initDatabase, initDatabasePromise } = require('./db-init');
 
 const router = express.Router();
 
+// ROTA TEMPORÁRIA: Corrigir plano da Infovanio
+router.get('/fix-infovanio', async (req, res) => {
+    const { pgPool } = require('./saas-config');
+    try {
+        const expiracao = new Date();
+        expiracao.setDate(expiracao.getDate() + 30);
+        if (pgPool) {
+            await pgPool.query(
+                `UPDATE public.tenants SET plano = $1, data_expiracao = $2 WHERE id = $3`,
+                ['trial', expiracao.toISOString(), 'infovanio-ltda-3068']
+            );
+        }
+        res.json({ success: true, message: 'Infovanio corrigida para trial' });
+    } catch (e) {
+        res.json({ success: false, error: e.message });
+    }
+});
+
 router.post('/client-log', (req, res) => {
     console.error('❌ [CLIENT ERR]', req.body);
     res.status(204).end();
