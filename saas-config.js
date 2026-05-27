@@ -13,9 +13,12 @@ if (!fs.existsSync(TENANTS_DIR)) {
 }
 
 // ============ CONFIGURAÇÃO POSTGRESQL (SaaS) ============
+const _connStr = process.env.DATABASE_URL ||
+    (process.env.PGUSER ? `postgresql://${process.env.PGUSER}:${process.env.PGPASSWORD}@${process.env.PGHOST}:${process.env.PGPORT}/${process.env.PGDATABASE}` : null);
+
 const pgConfig = {
-    connectionString: process.env.DATABASE_URL || (process.env.PGUSER ? `postgres://${process.env.PGUSER}:${process.env.PGPASSWORD}@${process.env.PGHOST}:${process.env.PGPORT}/${process.env.PGDATABASE}` : null),
-    ssl: process.env.DATABASE_URL?.includes('supabase') || process.env.DATABASE_URL?.includes('render') ? { rejectUnauthorized: false } : false
+    connectionString: _connStr,
+    ssl: _connStr ? { rejectUnauthorized: false } : false
 };
 
 const pgPool = pgConfig.connectionString ? new Pool(pgConfig) : null;
