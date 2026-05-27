@@ -250,8 +250,8 @@
     </div>
 
     <script>
-        let senhaAtual = '';
-        let emailAtual = '';
+        let senhaAtual = localStorage.getItem('gestor_senha') || '';
+        let emailAtual = localStorage.getItem('gestor_email') || '';
         let todosOsTenants = [];
 
         function selecionarLinha(el) {
@@ -266,6 +266,8 @@
             if (!senha || !email) return;
             senhaAtual = senha;
             emailAtual = email;
+            localStorage.setItem('gestor_senha', senha);
+            localStorage.setItem('gestor_email', email);
             carregarTenants();
         }
 
@@ -275,6 +277,11 @@
                 if (e.key === 'Enter') fazerLogin();
             });
         });
+
+        // Auto-login se já tiver credenciais salvas
+        if (senhaAtual && emailAtual) {
+            carregarTenants();
+        }
 
         async function carregarTenants() {
             try {
