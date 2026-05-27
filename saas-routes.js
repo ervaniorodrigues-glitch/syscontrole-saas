@@ -467,22 +467,16 @@ router.get('/status/:tenantId', (req, res) => {
 const CONFIG_FILE = path.join(__dirname, 'gestor-config.json');
 let gestorConfig = { 
     email: process.env.GESTOR_EMAIL || 'ervanio.rodrigues@gmail.com', 
-    senha: process.env.GESTOR_SENHA || 'aSenha01' 
+    senha: process.env.GESTOR_SENHA || '@Senha01'
 };
 
 function carregarConfig() {
     try {
-        // Variáveis de ambiente SEMPRE têm prioridade
+        // Variáveis de ambiente SEMPRE têm prioridade absoluta
         if (process.env.GESTOR_EMAIL) gestorConfig.email = process.env.GESTOR_EMAIL;
         if (process.env.GESTOR_SENHA) gestorConfig.senha = process.env.GESTOR_SENHA;
-        
-        // Só lê o arquivo se NÃO houver variáveis de ambiente
-        if (!process.env.GESTOR_EMAIL && !process.env.GESTOR_SENHA && fs.existsSync(CONFIG_FILE)) {
-            const fileConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-            gestorConfig = { ...fileConfig };
-        }
     } catch (e) {
-        console.error('Erro ao carregar gestor-config.json:', e.message);
+        console.error('Erro ao carregar config do gestor:', e.message);
     }
 }
 function salvarConfig() {
