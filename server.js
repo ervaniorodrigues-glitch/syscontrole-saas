@@ -4924,8 +4924,10 @@ app.post('/api/backup/restaurar', async (req, res) => {
 
         const filtrarObjeto = (obj, validSet) => {
             const result = {};
+            const validSetArr = [...validSet];
             for (const [k, v] of Object.entries(obj)) {
-                if (validSet.has(k)) result[k] = v;
+                const matchedKey = validSetArr.find(vKey => vKey.toLowerCase() === k.toLowerCase());
+                if (matchedKey) result[matchedKey] = v;
             }
             return result;
         };
