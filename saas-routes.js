@@ -18,7 +18,9 @@ router.get('/fix-infovanio', async (req, res) => {
                 ['trial', expiracao.toISOString(), 'infovanio-ltda-3068']
             );
         }
-        res.json({ success: true, message: 'Infovanio corrigida para trial' });
+        // Verificar resultado
+        const check = pgPool ? (await pgPool.query('SELECT id, nome_empresa, plano, ativo FROM public.tenants')).rows : [];
+        res.json({ success: true, message: 'Infovanio corrigida para trial', tenants: check });
     } catch (e) {
         res.json({ success: false, error: e.message });
     }
